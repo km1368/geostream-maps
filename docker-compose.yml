@@ -1,0 +1,108 @@
+
+name: mahyaar-maps
+
+services:
+  db:
+    image: docker.arvancloud.ir/postgis/postgis:16-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
+    networks:
+      - mapnet
+
+  # One-time/on-demand importer. It does not remain running.
+  importer:
+    image: docker.arvancloud.ir/iboates/osm2pgsql:2.3.1
+    profiles:
+      - import
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint: ["/bin/sh", "/scripts/import.sh"]
+    volumes:
+      - ./data:/data:ro
+      - ./config:/config:ro
+      - ./scripts:/scripts:ro
+    networks:
+      - mapnet
+
+  # Applies post-import SQL (columns + indexes). Uses the PostGIS image
+  # because the osm2pgsql image has no psql client.
+  post_import:
+    image: docker.arvancloud.ir/postgis/postgis:16-3.5
+    profiles:
+      - import
+    depends_on:
+      db:
+        condition: service_healthy
+      importer:
+        condition: service_completed_successfully
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/scripts/post_import.sql"]
+    volumes:
+      - ./scripts:/scripts:ro
+    networks:
+      - mapnet
+
+  martin:
+    image: ghcr-mirror.liara.ir/maplibre/martin:1.16.1
+    # image: ghcr.io/maplibre/martin:1.16.1
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - "--listen-addresses"
+      - "0.0.0.0:3000"
+      - "--font"
+      - "/fonts"
+      - "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+    volumes:
+      - ./fonts:/fonts:ro
+    networks:
+      - mapnet
+
+  web:
+    image: docker.arvancloud.ir/library/nginx:1.31.5-alpine3.24-perl
+    restart: unless-stopped
+    depends_on:
+      - martin
+    ports:
+      - "8080:80"
+    volumes:
+      - ./web/index.html:/usr/share/nginx/html/index.html:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - mapnet
+
+volumes:
+  postgres_data:
+
+networks:
+  mapnet:
