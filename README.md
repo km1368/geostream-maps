@@ -1,18 +1,18 @@
-# Mahyaar Maps — Real-Time Traffic Map
+# Final project of the  — Real-Time Traffic Map
 
 A minimal "Google Maps" clone for Tehran: live street-level traffic colors on a vector map, with a 7-day trend per street on hover. Built as the final project of the data engineering course, going beyond the base criteria by adding a real-time streaming pipeline on top of the classic OSM → PostGIS → tiles → map stack.
 
 ## Data Engineering Stack
 
-| Component | Role |
-|---|---|
-| **Postgres + PostGIS** | Street geometry + **latest status** of each street: current duration, current baseline duration, current color on the map. |
-| **Redpanda** | Real-time data broker (`gps.raw` and `gps.enriched` topics). |
-| **Spark + Sedona** | Streaming job: flags inaccurate/invalid GPS pings, spatial-joins each valid ping to a street, publishes enriched events back to Redpanda. |
-| **ClickHouse** | Aggregated 7-day trend per street (shown on hover). `AggregatingMergeTree` auto-aggregates, TTL keeps only 7 days of data. Receives live data from Redpanda. |
-| **MinIO (lakehouse)** | Raw immutable events; input for the nightly next-day traffic prediction job. |
-| **Airflow** | Orchestrates the hourly OSM refresh (download latest Iran extract → extract Tehran → load PostGIS) and the nightly prediction jobs. |
-| **Python** | (1) Generates the live GPS stream (coordinates + speed of users). (2) Seeds 7 days of history into ClickHouse at initialization. |
+| Component              | Role                                                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Postgres + PostGIS** | Street geometry + **latest status** of each street: current duration, current baseline duration, current color on the map.                                   |
+| **Redpanda**           | Real-time data broker (`gps.raw` and `gps.enriched` topics).                                                                                                 |
+| **Spark + Sedona**     | Streaming job: flags inaccurate/invalid GPS pings, spatial-joins each valid ping to a street, publishes enriched events back to Redpanda.                    |
+| **ClickHouse**         | Aggregated 7-day trend per street (shown on hover). `AggregatingMergeTree` auto-aggregates, TTL keeps only 7 days of data. Receives live data from Redpanda. |
+| **MinIO (lakehouse)**  | Raw immutable events; input for the nightly next-day traffic prediction job.                                                                                 |
+| **Airflow**            | Orchestrates the hourly OSM refresh (download latest Iran extract → extract Tehran → load PostGIS) and the nightly prediction jobs.                          |
+| **Python**             | (1) Generates the live GPS stream (coordinates + speed of users). (2) Seeds 7 days of history into ClickHouse at initialization.                             |
 
 ### Data flow
 
@@ -40,7 +40,7 @@ flowchart TD
 ### Serving process
 
 ```mermaid
-flowchart LR
+flowchart TD
     U["Browser<br/>HTML/CSS + MapLibre GL JS"] -->|"HTTP requests"| NG["Nginx"]
     NG -->|"static page"| U
     NG -->|"/tiles/*"| MA["Martin tile server"]

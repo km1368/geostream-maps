@@ -21,7 +21,7 @@ services:
       timeout: 5s
       retries: 20
     ports:
-      - "5432:5432"
+      - "15432:5432"
     networks:
       - mapnet
 
