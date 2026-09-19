@@ -1,6 +1,6 @@
 # Final project of the  — Real-Time Traffic Map
 
-A minimal "Google Maps" clone for Tehran: live street-level traffic colors on a vector map, with a 7-day trend per street on hover. Built as the final project of the data engineering course, going beyond the base criteria by adding a real-time streaming pipeline on top of the classic OSM → PostGIS → tiles → map stack.
+A minimal "Google Maps" clone for Tehran: live street-level traffic colors on a vector map, with a 7-day trend per street on hover. Built as the final project of the data engineering course. 
 
 ## Data Engineering Stack
 
