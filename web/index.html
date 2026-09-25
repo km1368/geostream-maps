@@ -75,9 +75,13 @@ maplibregl.setRTLTextPlugin(
 const map = new maplibregl.Map({
     container: "map",
     center: [51.3890, 35.6892],
-    zoom: 11,
+    zoom: 8,
     minZoom: 8,
-    maxZoom: 19,
+    maxZoom: 15,
+    maxBounds: [
+        [51.05, 35.50], // Southwest corner (lng, lat)
+        [51.70, 35.90]  // Northeast corner (lng, lat)
+    ],
 
     style: {
         version: 8,

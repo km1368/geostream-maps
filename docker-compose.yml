@@ -2,9 +2,9 @@
 name: mahyaar-maps
 
 services:
+
   db:
     image: docker.arvancloud.ir/postgis/postgis:16-3.5
-    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -22,6 +22,44 @@ services:
       retries: 20
     ports:
       - "15432:5432"
+    networks:
+      - mapnet
+
+
+  redpanda-0:
+    container_name: redpanda-0
+    image: docker.arvancloud.ir/redpandadata/redpanda:v26.2.2
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --kafka-addr internal://0.0.0.0:29092,external://0.0.0.0:9092
+      - --advertise-kafka-addr internal://redpanda-0:29092,external://localhost:9092
+    ports:
+      - "9092:9092"
+    networks:
+      - mapnet
+    
+  redpanda-console:
+    container_name: redpanda-console
+    image: docker.arvancloud.ir/redpandadata/console:v3.11.0
+    entrypoint: /bin/sh
+    command: -c 'echo "$$CONSOLE_CONFIG_FILE" > /tmp/config.yml; /app/console'
+    environment:
+      CONFIG_FILEPATH: /tmp/config.yml
+      CONSOLE_CONFIG_FILE: |
+        kafka:
+          brokers: ["redpanda-0:29092"]
+        redpanda:
+          adminApi:
+            enabled: true
+            urls: ["http://redpanda-0:9644"]
+    ports:
+      - "9300:8080"
+    depends_on:
+      - redpanda-0
     networks:
       - mapnet
 
@@ -88,6 +126,69 @@ services:
     networks:
       - mapnet
 
+  # Spark + Sedona playground: 1 master + 1 worker + JupyterLab (no token).
+  # Notebooks live in ./sedona/notebooks, mounted at the image's /opt/workspace.
+  sedona:
+    image: docker.arvancloud.ir/apache/sedona:1.9.1
+    restart: unless-stopped
+    environment:
+      DRIVER_MEM: 2g
+      EXECUTOR_MEM: 2g
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "8888:8888"   # JupyterLab
+      - "8086:8080"   # Spark master UI (8080 is taken by web)
+      - "8087:8081"   # Spark worker UI
+    volumes:
+      - ./sedona/notebooks:/opt/workspace:rw
+      - sedona_ivy:/root/.ivy2
+    networks:
+      - mapnet
+
+  # Spark Structured Streaming job: reads GPS pings from Redpanda's `gps-raw`
+  # topic, flags pings with a large GPS accuracy error (radius_error_m > 40 m)
+  # as invalid, spatial-joins each ping to its nearest street (PostGIS `roads`
+  # table) and adds `street_id`, then writes them back to Redpanda on
+  # `gps-processed`.
+  sedona-stream:
+    image: docker.arvancloud.ir/apache/sedona:1.9.1
+    restart: unless-stopped
+    depends_on:
+      - redpanda-0
+      - db
+    environment:
+      DRIVER_MEM: 1g
+      EXECUTOR_MEM: 1g
+      # spark-submit needs a plain python, not jupyter (the image default).
+      PYSPARK_DRIVER_PYTHON: python3
+      PYSPARK_PYTHON: python3
+      KAFKA_BOOTSTRAP: redpanda-0:29092
+      RAW_TOPIC: gps-raw
+      PROCESSED_TOPIC: gps-processed
+      MAX_RADIUS_ERROR_M: "40"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command:
+      - /opt/spark/bin/spark-submit
+      - --master
+      - local[2]
+      # Kafka connector for Spark 4.0 / Scala 2.13 + Postgres JDBC driver,
+      # pre-fetched into ./sedona/jars (mounted below). Using --jars instead
+      # of --packages avoids a runtime Ivy download from Maven Central, which
+      # hangs indefinitely on some networks (TLS handshake black-hole).
+      - --jars
+      - /opt/workspace/jars/spark-sql-kafka-0-10_2.13-4.0.1.jar,/opt/workspace/jars/spark-token-provider-kafka-0-10_2.13-4.0.1.jar,/opt/workspace/jars/kafka-clients-3.9.1.jar,/opt/workspace/jars/commons-pool2-2.12.0.jar,/opt/workspace/jars/postgresql-42.7.7.jar
+      - /opt/workspace/streaming_job.py
+    volumes:
+      - ./sedona/streaming_job.py:/opt/workspace/streaming_job.py:ro
+      - ./sedona/jars:/opt/workspace/jars:ro
+      - sedona_checkpoints:/opt/workspace/.checkpoints
+    networks:
+      - mapnet
+
   web:
     image: docker.arvancloud.ir/library/nginx:1.31.5-alpine3.24-perl
     restart: unless-stopped
@@ -103,6 +204,8 @@ services:
 
 volumes:
   postgres_data:
+  sedona_ivy:
+  sedona_checkpoints:
 
 networks:
   mapnet:
