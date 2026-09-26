@@ -1,7 +1,7 @@
 ALTER TABLE roads
     ADD COLUMN IF NOT EXISTS traffic_level smallint,
     ADD COLUMN IF NOT EXISTS speed_kmh real,
-    ADD COLUMN IF NOT EXISTS traffic_updated_at timestamptz;
+    ADD COLUMN IF NOT EXISTS traffic_updated_at timestamp;
 
 CREATE UNIQUE INDEX IF NOT EXISTS roads_osm_id_idx
     ON roads (osm_id);

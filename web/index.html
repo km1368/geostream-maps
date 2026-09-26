@@ -48,14 +48,6 @@
 <body>
 <div id="map"></div>
 
-<div class="legend">
-    <div><span class="swatch" style="background:#24a148"></span>Free</div>
-    <div><span class="swatch" style="background:#f1c21b"></span>Moderate</div>
-    <div><span class="swatch" style="background:#ff832b"></span>Heavy</div>
-    <div><span class="swatch" style="background:#da1e28"></span>Severe</div>
-    <div><span class="swatch" style="background:#8d8d8d"></span>No data</div>
-</div>
-
 <script>
 // Required for correct Persian/Arabic rendering: without this plugin,
 // RTL text is drawn disconnected and left-to-right. It must be set
@@ -357,6 +349,20 @@ const map = new maplibregl.Map({
 });
 
 map.addControl(new maplibregl.NavigationControl(), "top-right");
+
+// Re-fetch the roads source tiles every 15 seconds so traffic levels
+// (traffic_level / speed_kmh) stay current. refreshTiles reloads only
+// the given source, so green areas, water and the background are not
+// re-requested. nginx already serves /tiles/ with no-cache headers, so
+// the browser will not return stale tiles from its HTTP cache.
+map.on("load", () => {
+    setInterval(() => {
+        // Skip refreshes while the tab is hidden to save bandwidth.
+        if (!document.hidden) {
+            map.refreshTiles("roads");
+        }
+    }, 15000);
+});
 
 map.on("click", "traffic", (event) => {
     const feature = event.features[0];
