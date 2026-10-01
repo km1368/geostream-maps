@@ -74,10 +74,10 @@ async def generate_pings(name, params):
 
         producer.send('gps-raw', payload)
 
-        print(f"[{name}] Generated: {json.dumps(payload)}")
+        # print(f"[{name}] Generated: {json.dumps(payload)}")
 
         # wait for a random interval before the next ping
-        random_interval = random.uniform(0.5, 3.0)
+        random_interval = random.uniform(0.1, 0.5)
         await asyncio.sleep(random_interval)
 
 
