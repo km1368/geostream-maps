@@ -6,6 +6,12 @@ looks up the street each ping belongs to (nearest road to the ping's lat/lng,
 spatial-joined against the PostGIS `roads` table) and adds it as `street_id`,
 then writes the enriched events back to Redpanda on the `gps-processed` topic.
 
+Every micro-batch (fired every TRIGGER_INTERVAL, 15 s by default) also
+aggregates the batch's valid pings per street and bulk-updates the `roads`
+traffic columns: the average speed over the batch, the traffic level derived
+from the speed ratio against the free-flow reference speed
+(FREE_FLOW_SPEED_KMH), and the time of the update.
+
 Runs inside the `sedona-stream` container via spark-submit (see the
 `sedona-stream` service in docker-compose.yml).
 """
@@ -41,6 +47,15 @@ JDBC_PROPS = {
 # from every road get `street_id = null`.
 MAX_STREET_DISTANCE_M = float(os.environ.get("MAX_STREET_DISTANCE_M", "100"))
 
+# Free-flow reference speed for the traffic level: the ratio
+# r = speed_kmh / FREE_FLOW_SPEED_KMH maps to 0 = free flow (r >= 0.8),
+# 1 = slow (0.6 <= r < 0.8), 2 = heavy (0.4 <= r < 0.6), 3 = jammed (r < 0.4).
+FREE_FLOW_SPEED_KMH = float(os.environ.get("FREE_FLOW_SPEED_KMH", "50"))
+
+# How often the streaming query fires a micro-batch — and therefore how often
+# the `roads` traffic columns are refreshed.
+TRIGGER_INTERVAL = os.environ.get("TRIGGER_INTERVAL", "15 seconds")
+
 spark = (
     SparkSession.builder
     .appName("gps-validate-stream")
@@ -69,6 +84,53 @@ roads = (
 )
 road_count = roads.count()  # fail fast if the OSM import has not run yet
 print(f"Loaded {road_count} streets from PostGIS for the street lookup")
+
+
+def update_roads_traffic(stats_df):
+    """Bulk-update the `roads` traffic columns from one batch's aggregates.
+
+    The aggregated result is tiny (at most one row per street touched in the
+    batch), so it is collected to the driver and applied as a single
+    UPDATE ... FROM (VALUES ...) statement — one transaction per batch instead
+    of one round trip per ping. Runs on the driver over JDBC; the Postgres
+    driver is already registered with DriverManager by the startup JDBC read
+    above (same driver jar shipped via --jars in docker-compose.yml).
+    """
+    rows = [
+        row for row in stats_df.collect()
+        if row["speed_kmh"] is not None and row["traffic_updated_at"] is not None
+    ]
+    if not rows:
+        return
+
+    def sql_literal(row):
+        ts = str(row["traffic_updated_at"]).replace("'", "''")
+        return (f"({int(row['street_id'])}, {row['speed_kmh']}, "
+                f"{int(row['traffic_level'])}, '{ts}'::timestamptz)")
+
+    sql = (
+        "UPDATE roads AS r SET "
+        "speed_kmh = v.speed_kmh, "
+        "traffic_level = v.traffic_level, "
+        "traffic_updated_at = v.traffic_updated_at "
+        "FROM (VALUES " + ", ".join(sql_literal(row) for row in rows) + ") "
+        "AS v(osm_id, speed_kmh, traffic_level, traffic_updated_at) "
+        "WHERE r.osm_id = v.osm_id"
+    )
+
+    jvm = spark.sparkContext._jvm
+    conn = jvm.java.sql.DriverManager.getConnection(
+        JDBC_URL, JDBC_PROPS["user"], JDBC_PROPS["password"])
+    try:
+        stmt = conn.createStatement()
+        try:
+            updated = stmt.executeUpdate(sql)
+        finally:
+            stmt.close()
+    finally:
+        conn.close()
+    print(f"Updated traffic for {updated} streets "
+          f"({len(rows)} streets had valid pings in this batch)")
 
 
 def enrich_batch(batch_df, batch_df_id):
@@ -135,6 +197,8 @@ def enrich_batch(batch_df, batch_df_id):
 
     # Flag pings with a GPS accuracy error above the threshold as invalid and
     # attach the looked-up street id (null when no street is within range).
+    # The result feeds both the Kafka write and the per-street aggregation
+    # below, so cache it: the spatial join then runs only once per batch.
     enriched = (
         pings.join(nearest, "ping_id", "left")
         .withColumnRenamed("osm_id", "street_id")
@@ -142,24 +206,50 @@ def enrich_batch(batch_df, batch_df_id):
             "is_valid",
             F.col("radius_error_m") <= F.lit(MAX_RADIUS_ERROR_M),
         )
+        .persist()
     )
 
-    enriched.select(
-        F.to_json(
-            F.struct(
-                F.col("timestamp"),
-                F.col("latitude"),
-                F.col("longitude"),
-                F.col("speed_kmh"),
-                F.col("radius_error_m"),
-                F.col("is_valid"),
-                F.col("street_id"),
+    try:
+        enriched.select(
+            F.to_json(
+                F.struct(
+                    F.col("timestamp"),
+                    F.col("latitude"),
+                    F.col("longitude"),
+                    F.col("speed_kmh"),
+                    F.col("radius_error_m"),
+                    F.col("is_valid"),
+                    F.col("street_id"),
+                )
+            ).alias("value")
+        ).write.format("kafka") \
+            .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP) \
+            .option("topic", PROCESSED_TOPIC) \
+            .save()
+
+        # Aggregate the batch's valid pings per street and refresh the roads
+        # traffic columns: average speed over the batch, plus the traffic
+        # level derived from the speed ratio against the free-flow speed.
+        ratio = F.col("speed_kmh") / F.lit(FREE_FLOW_SPEED_KMH)
+        street_stats = (
+            enriched
+            .filter(F.col("is_valid") & F.col("street_id").isNotNull())
+            .groupBy("street_id")
+            .agg(
+                F.avg("speed_kmh").alias("speed_kmh"),
+                F.max("timestamp").alias("traffic_updated_at"),
             )
-        ).alias("value")
-    ).write.format("kafka") \
-        .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP) \
-        .option("topic", PROCESSED_TOPIC) \
-        .save()
+            .withColumn(
+                "traffic_level",
+                F.when(ratio >= 0.8, F.lit(0))   # free flow
+                .when(ratio >= 0.6, F.lit(1))    # slow
+                .when(ratio >= 0.4, F.lit(2))    # heavy
+                .otherwise(F.lit(3)),            # jammed
+            )
+        )
+        update_roads_traffic(street_stats)
+    finally:
+        enriched.unpersist()
 
 
 query = (
@@ -171,13 +261,15 @@ query = (
     .load()
     .writeStream
     .foreachBatch(enrich_batch)
+    .trigger(processingTime=TRIGGER_INTERVAL)
     .option("checkpointLocation", CHECKPOINT)
     .start()
 )
 
 print(
-    f"Streaming {RAW_TOPIC} -> {PROCESSED_TOPIC} "
+    f"Streaming {RAW_TOPIC} -> {PROCESSED_TOPIC} every {TRIGGER_INTERVAL} "
     f"(is_valid = radius_error_m <= {MAX_RADIUS_ERROR_M}, "
-    f"street_id = nearest road within {MAX_STREET_DISTANCE_M:.0f} m)"
+    f"street_id = nearest road within {MAX_STREET_DISTANCE_M:.0f} m, "
+    f"traffic_level = speed / {FREE_FLOW_SPEED_KMH:.0f} km/h ratio)"
 )
 query.awaitTermination()

@@ -115,14 +115,22 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Config file disables Martin's in-memory tile cache (cache: disable).
+    # Without it, tiles are generated once and served stale forever, so the
+    # traffic colors on the map would never change. The connection string
+    # inside the config uses the same POSTGRES_* env vars.
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     command:
-      - "--listen-addresses"
-      - "0.0.0.0:3000"
+      - "--config"
+      - "/config/martin.yaml"
       - "--font"
       - "/fonts"
-      - "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
     volumes:
       - ./fonts:/fonts:ro
+      - ./config/martin.yaml:/config/martin.yaml:ro
     networks:
       - mapnet
 
@@ -168,6 +176,8 @@ services:
       RAW_TOPIC: gps-raw
       PROCESSED_TOPIC: gps-processed
       MAX_RADIUS_ERROR_M: "40"
+      TRIGGER_INTERVAL: "15 seconds"
+      FREE_FLOW_SPEED_KMH: "30"
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
