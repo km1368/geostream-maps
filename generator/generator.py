@@ -54,29 +54,30 @@ HOTSPOTS = load_hotspots()
 
 
 async def generate_pings(name, params):
-    """Generates continuous pings for a specific hotspot at random intervals."""
+    """Generates continuous pings for a specific hotspot, 5 pings per turn."""
     mean = [params["lat"], params["lon"]]
     cov = [[params["lat_spread"]**2, 0], [0, params["lon_spread"]**2]]
 
     while True:
-        # 1. Generate a single random GPS coordinate using Gaussian distribution
-        gps_ping = np.random.multivariate_normal(mean, cov, size=1)[0]
+        # 1. Generate 5 random GPS coordinates using Gaussian distribution
+        gps_pings = np.random.multivariate_normal(mean, cov, size=5)
 
-        # 2. Create a JSON payload (this is what you would send to Kafka)
-        payload = {
-            "timestamp": datetime.now().isoformat(),
-            "latitude": round(gps_ping[0], 6),
-            "longitude": round(gps_ping[1], 6),
-            "speed_kmh": round(random.uniform(10, 60), 1),
-            # Gaussian-distributed GPS accuracy error (mean 15m, std 10m), clipped at 1m
-            "radius_error_m": round(max(1.0, np.random.normal(15.0, 10.0)), 1)
-        }
+        # 2. Create a JSON payload for each ping (this is what you would send to Kafka)
+        for gps_ping in gps_pings:
+            payload = {
+                "timestamp": datetime.now().isoformat(),
+                "latitude": round(gps_ping[0], 6),
+                "longitude": round(gps_ping[1], 6),
+                "speed_kmh": round(random.uniform(10, 60), 1),
+                # Gaussian-distributed GPS accuracy error (mean 15m, std 10m), clipped at 1m
+                "radius_error_m": round(max(1.0, np.random.normal(15.0, 10.0)), 1)
+            }
 
-        producer.send('gps-raw', payload)
+            producer.send('gps-raw', payload)
 
-        # print(f"[{name}] Generated: {json.dumps(payload)}")
+            # print(f"[{name}] Generated: {json.dumps(payload)}")
 
-        # wait for a random interval before the next ping
+        # wait for a random interval before the next turn
         random_interval = random.uniform(0.1, 0.5)
         await asyncio.sleep(random_interval)
 
