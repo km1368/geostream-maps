@@ -5,6 +5,9 @@ accuracy error is too large (radius_error_m > MAX_RADIUS_ERROR_M) as invalid,
 looks up the street each ping belongs to (nearest road to the ping's lat/lng,
 spatial-joined against the PostGIS `roads` table) and adds it as `street_id`,
 then writes the enriched events back to Redpanda on the `gps-processed` topic.
+Each enriched event also carries `date` ("yyyy-MM-dd") and `hour` (int 0-23)
+keys extracted from the ping timestamp, ready for day/hour aggregations
+downstream.
 
 Every micro-batch (fired every TRIGGER_INTERVAL, 15 s by default) also
 aggregates the batch's valid pings per street and bulk-updates the `roads`
@@ -155,6 +158,14 @@ def enrich_batch(batch_df, batch_df_id):
         # One stable id per ping so the "nearest street" window can partition.
         .withColumn("ping_id", F.monotonically_increasing_id())
         .withColumn("geom", F.expr("ST_Point(longitude, latitude)"))
+        # Calendar keys extracted from the ping timestamp: `date` as
+        # "yyyy-MM-dd" and `hour` as an int 0-23 (null when the timestamp
+        # does not parse). The generator sends naive local-time ISO
+        # timestamps, so no timezone conversion is applied.
+        .withColumn(
+            "date", F.date_format(F.to_timestamp("timestamp"), "yyyy-MM-dd")
+        )
+        .withColumn("hour", F.hour(F.to_timestamp("timestamp")))
     )
 
     # Distance join: Sedona builds a spatial index on the static `roads` side.
@@ -214,6 +225,8 @@ def enrich_batch(batch_df, batch_df_id):
             F.to_json(
                 F.struct(
                     F.col("timestamp"),
+                    F.col("date"),
+                    F.col("hour"),
                     F.col("latitude"),
                     F.col("longitude"),
                     F.col("speed_kmh"),

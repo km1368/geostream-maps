@@ -59,8 +59,8 @@ async def generate_pings(name, params):
     cov = [[params["lat_spread"]**2, 0], [0, params["lon_spread"]**2]]
 
     while True:
-        # 1. Generate 5 random GPS coordinates using Gaussian distribution
-        gps_pings = np.random.multivariate_normal(mean, cov, size=5)
+        # 1. Generate 10 random GPS coordinates using Gaussian distribution
+        gps_pings = np.random.multivariate_normal(mean, cov, size=10)
 
         # 2. Create a JSON payload for each ping (this is what you would send to Kafka)
         for gps_ping in gps_pings:

@@ -24,28 +24,27 @@ osmium extract \
 
 ### 3. Start the services in sequence
 
-Start the database and wait until it is healthy:
+Start the postgres database, then import streets and other data from osm data into tables, then add columns for the current status of streets, and finally, bring the cluster up:
 
 ```bash
-docker compose up -d db
+docker compose up -d db; 
+docker compose --profile import run --rm importer; 
+docker compose --profile import run --rm --no-deps post_import; 
+docker compose up -d;
 ```
 
-Run the one-time import, then apply post-import SQL:
-
-```bash
-docker compose --profile import run --rm importer
-```
-
-Start the remaining services (Martin tile server + web UI):
-
-```bash
-docker compose up -d
-```
-
-### 4. Verify
+### 4. Verify on the map
 
 Open the URL 
 
 ```bash
 http://localhost:8080
+```
+
+### 5. Verify in ClickHouse
+
+```SQL
+SELECT street_id, date, hour, avgMerge(speed_kmh) AS avg_speed_kmh
+FROM default.tbl_gps_processed_aggregated
+GROUP BY street_id, date, hour ;
 ```
