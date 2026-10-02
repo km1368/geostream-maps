@@ -1,23 +1,18 @@
-#!/bin/bash
-# Executed by the official ClickHouse image entrypoint at startup.
-# Every *.sh / *.sql file in /docker-entrypoint-initdb.d/ is run after the
-# server is up -- but ONLY on first boot (empty data directory).
-#
-# Creates everything needed to consume from Redpanda:
-#   kfk_gps_processed_aggregated - Kafka engine table (reads topic
-#                                  'gps-processed' from redpanda-0:29092)
-#   tbl_gps_processed_aggregated - AggregatingMergeTree (final storage)
-#   mv_gps_processed_aggregated  - Materialized View moving data
-#                                  kfk_gps_processed_aggregated -> tbl_...
 
 echo "clickhouse-init: creating Kafka consumption pipeline..."
 
+# NOTE: `timestamp` must be DateTime64, NOT DateTime. Spark writes ISO-8601
+# timestamps with microsecond precision ("2026-10-02T21:39:09.489389") and
+# DateTime cannot parse fractional seconds: the Kafka consumer then fails on
+# EVERY message ("Cannot parse input: expected '"' ... while reading the
+# value of key timestamp"), gets stuck retrying the same offset forever
+# (system.kafka_consumers: num_messages_read grows, num_commits stays 0) and
+# Redpanda console shows "There were issues deserializing the value".
 clickhouse-client --multiquery <<'SQL'
 CREATE TABLE IF NOT EXISTS kfk_gps_processed_aggregated
 (
     street_id   Int64,
-    date        Date,
-    hour        UInt8,
+    timestamp   DateTime64,
     speed_kmh   Decimal(5,2)
 )
 ENGINE = Kafka
@@ -31,22 +26,23 @@ SETTINGS
 CREATE TABLE IF NOT EXISTS tbl_gps_processed_aggregated
 (
     street_id  Int64,
-    date       Date,
-    hour       UInt8,
-    speed_kmh  AggregateFunction(avg, Decimal(5,2))
+    timestamp  DateTime ,
+    speed_kmh  Decimal(5,2)
 )
-ENGINE = AggregatingMergeTree
-ORDER BY (street_id, date, hour);
+ENGINE = MergeTree
+ORDER BY (street_id, timestamp)
+TTL timestamp + INTERVAL 6 HOUR;
 
+-- streetless pings (street_id IS NULL) are dropped here so the non-Nullable
+-- MergeTree table only holds rows that belong to a real street.
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_gps_processed_aggregated
 TO tbl_gps_processed_aggregated
 AS SELECT
     street_id,
-    date,
-    hour,
-    avgState(speed_kmh) AS speed_kmh
+    timestamp,
+    speed_kmh
 FROM kfk_gps_processed_aggregated
-GROUP BY street_id, date, hour;
+WHERE street_id IS NOT NULL;
 SQL
 
 echo "clickhouse-init: done."
