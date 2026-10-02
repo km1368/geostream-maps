@@ -1,26 +1,49 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="utf-8">
     <title>Tehran Traffic Map</title>
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1"
-    >
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <link
-        rel="stylesheet"
-        href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css"
-    >
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
 
     <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
 
     <style>
-        html, body, #map {
+        /* UI font (legend, popups). The TTF is served by nginx from the
+        same ./fonts directory that is mounted into the Martin container. */
+        @font-face {
+            font-family: "Vazirmatn";
+            src: url("/fonts/Vazirmatn.ttf") format("truetype");
+            font-weight: normal;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        html,
+        body,
+        #map {
             margin: 0;
             width: 100%;
             height: 100%;
+            font-family: "Vazirmatn", sans-serif;
+        }
+
+        /* Popup text is not selectable: dragging across the popup would
+        otherwise highlight it, and double-clicks would select words. */
+        .maplibregl-popup-content {
+            font-family: "Vazirmatn", sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            border-radius: 14px;
+        }
+
+        /* The close button sits on the popup's top-right corner; round that
+        corner so it doesn't poke out past the softer content box. */
+        .maplibregl-popup-close-button {
+            border-radius: 0 14px 0 0;
         }
 
         .legend {
@@ -31,7 +54,7 @@
             padding: 10px 12px;
             border-radius: 5px;
             background: rgba(255, 255, 255, 0.92);
-            font: 13px sans-serif;
+            font: 13px "Vazirmatn", sans-serif;
             line-height: 21px;
         }
 
@@ -42,351 +65,535 @@
             margin-right: 7px;
             vertical-align: middle;
         }
+
+        /* Popup street name: larger and centered above the rest of the text. */
+        .maplibregl-popup-content .popup-title {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 15px;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        /* Speed / traffic grid: titles on the top row, values below. */
+        .maplibregl-popup-content .popup-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            margin-bottom: 6px;
+            text-align: center;
+        }
+
+        .maplibregl-popup-content .popup-grid .grid-title {
+            padding: 2px 0;
+            font-size: 11px;
+            color: #6b6b6b;
+        }
+
+        .maplibregl-popup-content .popup-grid .grid-value {
+            padding: 2px 0;
+            font-size: 13px;
+            font-weight: 600;
+        }
     </style>
 </head>
 
 <body>
-<div id="map"></div>
+    <div id="map"></div>
 
-<script>
-// Required for correct Persian/Arabic rendering: without this plugin,
-// RTL text is drawn disconnected and left-to-right. It must be set
-// before the map is created. The plugin is served from the same origin
-// (nginx proxies /tiles/ to Martin, which has no plugin endpoint, so we
-// use the official CDN copy).
-maplibregl.setRTLTextPlugin(
-    "https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.3.0/dist/mapbox-gl-rtl-text.js",
-    (error) => {
-        if (error) {
-            console.error("Failed to load RTL text plugin:", error);
-        }
-    },
-    true // lazy: only load the plugin when RTL text is actually needed
-);
-
-const map = new maplibregl.Map({
-    container: "map",
-    center: [51.3890, 35.6892],
-    zoom: 8,
-    minZoom: 8,
-    maxZoom: 15,
-    maxBounds: [
-        [51.05, 35.50], // Southwest corner (lng, lat)
-        [51.70, 35.90]  // Northeast corner (lng, lat)
-    ],
-
-    style: {
-        version: 8,
-
-        // MapLibre needs glyph PBFs to draw any text. Martin generates them
-        // on the fly from the font files mounted into the martin container
-        // (see docker-compose.yml). The fontstack name must match the font
-        // name inside the file — check http://localhost:8080/tiles/catalog
-        // under "fonts" for the exact name to use here.
-        glyphs: `${location.origin}/tiles/font/{fontstack}/{range}`,
-
-        sources: {
-            green: {
-                type: "vector",
-                tiles: [
-                    `${location.origin}/tiles/green_areas/{z}/{x}/{y}`
-                ],
-                minzoom: 8,
-                maxzoom: 20
-            },
-            water: {
-                type: "vector",
-                tiles: [
-                    `${location.origin}/tiles/water_areas/{z}/{x}/{y}`
-                ],
-                minzoom: 8,
-                maxzoom: 20
-            },
-            roads: {
-                type: "vector",
-                tiles: [
-                    `${location.origin}/tiles/roads/{z}/{x}/{y}`
-                ],
-                minzoom: 8,
-                maxzoom: 20
-            }
-        },
-
-        layers: [
-            {
-                id: "background",
-                type: "background",
-                paint: {
-                    "background-color": "#f2efe9"
+    <script>
+        // Required for correct Persian/Arabic rendering: without this plugin,
+        // RTL text is drawn disconnected and left-to-right. It must be set
+        // before the map is created. The plugin is served from the same origin
+        // (nginx proxies /tiles/ to Martin, which has no plugin endpoint, so we
+        // use the official CDN copy).
+        maplibregl.setRTLTextPlugin(
+            "https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.3.0/dist/mapbox-gl-rtl-text.js",
+            (error) => {
+                if (error) {
+                    console.error("Failed to load RTL text plugin:", error);
                 }
             },
+            true // lazy: only load the plugin when RTL text is actually needed
+        );
 
-            {
-                id: "green-fill",
-                type: "fill",
-                source: "green",
-                "source-layer": "green_areas",
-                paint: {
-                    "fill-color": "#cfe3c0",
-                    "fill-opacity": 0.85
-                }
-            },
+        const map = new maplibregl.Map({
+            container: "map",
+            center: [51.3890, 35.6892],
+            zoom: 8,
+            minZoom: 8,
+            maxZoom: 15,
+            maxBounds: [
+                [51.05, 35.50], // Southwest corner (lng, lat)
+                [51.70, 35.90]  // Northeast corner (lng, lat)
+            ],
 
-            {
-                id: "water-fill",
-                type: "fill",
-                source: "water",
-                "source-layer": "water_areas",
-                paint: {
-                    "fill-color": "#a5c8e3",
-                    "fill-opacity": 0.9
-                }
-            },
+            style: {
+                version: 8,
 
-            {
-                // Minor streets. Drawn so their labels don't float on the
-                // empty background; kept thin so major roads dominate.
-                id: "road-minor",
-                type: "line",
-                source: "roads",
-                "source-layer": "roads",
-                minzoom: 11,
-                filter: [
-                    "match",
-                    ["get", "highway"],
-                    [
-                        "tertiary", "tertiary_link",
-                        "residential", "unclassified", "living_street"
-                    ],
-                    true,
-                    false
-                ],
-                paint: {
-                    "line-color": "#ffffff",
-                    "line-opacity": 0.9,
-                    "line-width": [
-                        "interpolate",
-                        ["linear"],
-                        ["zoom"],
-                        11, 0.8,
-                        13, 1.8,
-                        16, 5
-                    ]
-                }
-            },
+                // MapLibre needs glyph PBFs to draw any text. Martin generates them
+                // on the fly from the font files mounted into the martin container
+                // (see docker-compose.yml). The fontstack name must match the font
+                // name inside the file — check http://localhost:8080/tiles/catalog
+                // under "fonts" for the exact name to use here.
+                glyphs: `${location.origin}/tiles/font/{fontstack}/{range}`,
 
-            {
-                id: "road-casing",
-                type: "line",
-                source: "roads",
-                "source-layer": "roads",
-                filter: [
-                    "match",
-                    ["get", "highway"],
-                    [
-                        "motorway", "motorway_link",
-                        "trunk", "trunk_link",
-                        "primary", "primary_link",
-                        "secondary", "secondary_link"
-                    ],
-                    true,
-                    false
-                ],
-                paint: {
-                    "line-color": "#ffffff",
-                    "line-opacity": 0.9,
-                    "line-width": [
-                        "interpolate",
-                        ["linear"],
-                        ["zoom"],
-                        9, 1.5,
-                        12, 3.5,
-                        16, 9
-                    ]
-                }
-            },
-
-            {
-                id: "traffic",
-                type: "line",
-                source: "roads",
-                "source-layer": "roads",
-                filter: [
-                    "match",
-                    ["get", "highway"],
-                    [
-                        "motorway", "motorway_link",
-                        "trunk", "trunk_link",
-                        "primary", "primary_link",
-                        "secondary", "secondary_link"
-                    ],
-                    true,
-                    false
-                ],
-                paint: {
-                    "line-color": [
-                        "match",
-                        ["coalesce", ["get", "traffic_level"], -1],
-                        0, "#24a148",
-                        1, "#f1c21b",
-                        2, "#ff832b",
-                        3, "#da1e28",
-                        "#8d8d8d"
-                    ],
-
-                    "line-width": [
-                        "interpolate",
-                        ["linear"],
-                        ["zoom"],
-                        9, 0.7,
-                        12, 2,
-                        16, 6
-                    ],
-
-                    "line-opacity": 0.95
-                }
-            },
-
-            {
-                id: "street-labels",
-                type: "symbol",
-                source: "roads",
-                "source-layer": "roads",
-                filter: [
-                    "match",
-                    ["get", "highway"],
-                    [
-                        "motorway", "motorway_link",
-                        "trunk", "trunk_link",
-                        "primary", "primary_link",
-                        "secondary", "secondary_link",
-                        "tertiary", "tertiary_link"
-                    ],
-                    true,
-                    false
-                ],
-                layout: {
-                    // Prefer the explicit Persian name, then the default OSM
-                    // name (which is Persian in Iran data). name_en is
-                    // deliberately NOT a fallback: most Iranian ways have no
-                    // name:fa tag, only name + name:en, so falling back to
-                    // name_en would show English labels all over the map.
-                    "text-field": [
-                        "coalesce",
-                        ["get", "name_fa"],
-                        ["get", "name"]
-                    ],
-                    // Must match a fontstack served by Martin. Check
-                    // http://localhost:8080/tiles/catalog for exact names.
-                    "text-font": ["IRANSansXFaNum Regular"],
-                    "text-size": [
-                        "interpolate", ["linear"], ["zoom"],
-                        10, 9,
-                        13, 12,
-                        16, 14
-                    ],
-                    "symbol-placement": "line",
-                    // Repeat the label along long streets more often than
-                    // the 250px default.
-                    "symbol-spacing": 180,
-                    "text-rotation-alignment": "map",
-                    "text-pitch-alignment": "viewport",
-                    // 30 rejected many placements on curved streets; the
-                    // default 45 lets far more labels through.
-                    "text-max-angle": 45,
-                    "text-letter-spacing": 0.05,
-                    "text-padding": 2
+                sources: {
+                    green: {
+                        type: "vector",
+                        tiles: [
+                            `${location.origin}/tiles/green_areas/{z}/{x}/{y}`
+                        ],
+                        minzoom: 8,
+                        maxzoom: 20
+                    },
+                    water: {
+                        type: "vector",
+                        tiles: [
+                            `${location.origin}/tiles/water_areas/{z}/{x}/{y}`
+                        ],
+                        minzoom: 8,
+                        maxzoom: 20
+                    },
+                    roads: {
+                        type: "vector",
+                        tiles: [
+                            `${location.origin}/tiles/roads/{z}/{x}/{y}`
+                        ],
+                        minzoom: 8,
+                        maxzoom: 20
+                    }
                 },
-                paint: {
-                    "text-color": "#333333",
-                    "text-halo-color": "#ffffff",
-                    "text-halo-width": 1.5
-                }
-            },
 
-            {
-                // Labels for minor streets, only from z13 up — at the
-                // startup zoom there would be far too many of them.
-                id: "street-labels-minor",
-                type: "symbol",
-                source: "roads",
-                "source-layer": "roads",
-                minzoom: 13,
-                filter: [
-                    "match",
-                    ["get", "highway"],
-                    ["residential", "unclassified", "living_street"],
-                    true,
-                    false
-                ],
-                layout: {
-                    "text-field": [
-                        "coalesce",
-                        ["get", "name_fa"],
-                        ["get", "name"]
-                    ],
-                    "text-font": ["IRANSansXFaNum Regular"],
-                    "text-size": [
-                        "interpolate", ["linear"], ["zoom"],
-                        13, 10,
-                        16, 12
-                    ],
-                    "symbol-placement": "line",
-                    "text-rotation-alignment": "map",
-                    "text-pitch-alignment": "viewport",
-                    "text-max-angle": 45,
-                    "text-letter-spacing": 0.05,
-                    "text-padding": 2
-                },
-                paint: {
-                    "text-color": "#6b6b6b",
-                    "text-halo-color": "#ffffff",
-                    "text-halo-width": 1.2
-                }
+                layers: [
+                    {
+                        id: "background",
+                        type: "background",
+                        paint: {
+                            "background-color": "#f2efe9"
+                        }
+                    },
+
+                    {
+                        id: "green-fill",
+                        type: "fill",
+                        source: "green",
+                        "source-layer": "green_areas",
+                        paint: {
+                            "fill-color": "#cfe3c0",
+                            "fill-opacity": 0.85
+                        }
+                    },
+
+                    {
+                        id: "water-fill",
+                        type: "fill",
+                        source: "water",
+                        "source-layer": "water_areas",
+                        paint: {
+                            "fill-color": "#a5c8e3",
+                            "fill-opacity": 0.9
+                        }
+                    },
+
+                    {
+                        // Minor streets. Drawn so their labels don't float on the
+                        // empty background; kept thin so major roads dominate.
+                        id: "road-minor",
+                        type: "line",
+                        source: "roads",
+                        "source-layer": "roads",
+                        minzoom: 11,
+                        filter: [
+                            "match",
+                            ["get", "highway"],
+                            [
+                                "tertiary", "tertiary_link",
+                                "residential", "unclassified", "living_street"
+                            ],
+                            true,
+                            false
+                        ],
+                        paint: {
+                            "line-color": "#ffffff",
+                            "line-opacity": 0.9,
+                            "line-width": [
+                                "interpolate",
+                                ["linear"],
+                                ["zoom"],
+                                11, 0.8,
+                                13, 1.8,
+                                16, 5
+                            ]
+                        }
+                    },
+
+                    {
+                        id: "road-casing",
+                        type: "line",
+                        source: "roads",
+                        "source-layer": "roads",
+                        filter: [
+                            "match",
+                            ["get", "highway"],
+                            [
+                                "motorway", "motorway_link",
+                                "trunk", "trunk_link",
+                                "primary", "primary_link",
+                                "secondary", "secondary_link"
+                            ],
+                            true,
+                            false
+                        ],
+                        paint: {
+                            "line-color": "#ffffff",
+                            "line-opacity": 0.9,
+                            "line-width": [
+                                "interpolate",
+                                ["linear"],
+                                ["zoom"],
+                                9, 1.5,
+                                12, 3.5,
+                                16, 9
+                            ]
+                        }
+                    },
+
+                    {
+                        id: "traffic",
+                        type: "line",
+                        source: "roads",
+                        "source-layer": "roads",
+                        filter: [
+                            "match",
+                            ["get", "highway"],
+                            [
+                                "motorway", "motorway_link",
+                                "trunk", "trunk_link",
+                                "primary", "primary_link",
+                                "secondary", "secondary_link"
+                            ],
+                            true,
+                            false
+                        ],
+                        paint: {
+                            "line-color": [
+                                "match",
+                                ["coalesce", ["get", "traffic_level"], -1],
+                                0, "#24a148",
+                                1, "#f1c21b",
+                                2, "#ff832b",
+                                3, "#da1e28",
+                                "#8d8d8d"
+                            ],
+
+                            "line-width": [
+                                "interpolate",
+                                ["linear"],
+                                ["zoom"],
+                                9, 0.7,
+                                12, 2,
+                                16, 6
+                            ],
+
+                            "line-opacity": 0.95
+                        }
+                    },
+
+                    {
+                        id: "street-labels",
+                        type: "symbol",
+                        source: "roads",
+                        "source-layer": "roads",
+                        filter: [
+                            "match",
+                            ["get", "highway"],
+                            [
+                                "motorway", "motorway_link",
+                                "trunk", "trunk_link",
+                                "primary", "primary_link",
+                                "secondary", "secondary_link",
+                                "tertiary", "tertiary_link"
+                            ],
+                            true,
+                            false
+                        ],
+                        layout: {
+                            // Prefer the explicit Persian name, then the default OSM
+                            // name (which is Persian in Iran data). name_en is
+                            // deliberately NOT a fallback: most Iranian ways have no
+                            // name:fa tag, only name + name:en, so falling back to
+                            // name_en would show English labels all over the map.
+                            "text-field": [
+                                "coalesce",
+                                ["get", "name_fa"],
+                                ["get", "name"]
+                            ],
+                            // Must match a fontstack served by Martin. Check
+                            // http://localhost:8080/tiles/catalog for exact names.
+                            "text-font": ["Vazirmatn Regular"],
+                            "text-size": [
+                                "interpolate", ["linear"], ["zoom"],
+                                10, 9,
+                                13, 12,
+                                16, 14
+                            ],
+                            "symbol-placement": "line",
+                            // Repeat the label along long streets more often than
+                            // the 250px default.
+                            "symbol-spacing": 180,
+                            "text-rotation-alignment": "map",
+                            "text-pitch-alignment": "viewport",
+                            // 30 rejected many placements on curved streets; the
+                            // default 45 lets far more labels through.
+                            "text-max-angle": 45,
+                            "text-letter-spacing": 0.05,
+                            "text-padding": 2
+                        },
+                        paint: {
+                            "text-color": "#333333",
+                            "text-halo-color": "#ffffff",
+                            "text-halo-width": 1.5
+                        }
+                    },
+
+                    {
+                        // Labels for minor streets, only from z13 up — at the
+                        // startup zoom there would be far too many of them.
+                        id: "street-labels-minor",
+                        type: "symbol",
+                        source: "roads",
+                        "source-layer": "roads",
+                        minzoom: 13,
+                        filter: [
+                            "match",
+                            ["get", "highway"],
+                            ["residential", "unclassified", "living_street"],
+                            true,
+                            false
+                        ],
+                        layout: {
+                            "text-field": [
+                                "coalesce",
+                                ["get", "name_fa"],
+                                ["get", "name"]
+                            ],
+                            "text-font": ["Vazirmatn Regular"],
+                            "text-size": [
+                                "interpolate", ["linear"], ["zoom"],
+                                13, 10,
+                                16, 12
+                            ],
+                            "symbol-placement": "line",
+                            "text-rotation-alignment": "map",
+                            "text-pitch-alignment": "viewport",
+                            "text-max-angle": 45,
+                            "text-letter-spacing": 0.05,
+                            "text-padding": 2
+                        },
+                        paint: {
+                            "text-color": "#6b6b6b",
+                            "text-halo-color": "#ffffff",
+                            "text-halo-width": 1.2
+                        }
+                    }
+                ]
             }
-        ]
-    }
-});
+        });
 
-map.addControl(new maplibregl.NavigationControl(), "top-right");
+        map.addControl(new maplibregl.NavigationControl(), "top-right");
 
-// Re-fetch the roads source tiles every 15 seconds so traffic levels
-// (traffic_level / speed_kmh) stay current. refreshTiles reloads only
-// the given source, so green areas, water and the background are not
-// re-requested. nginx already serves /tiles/ with no-cache headers, so
-// the browser will not return stale tiles from its HTTP cache.
-map.on("load", () => {
-    setInterval(() => {
-        // Skip refreshes while the tab is hidden to save bandwidth.
-        if (!document.hidden) {
-            map.refreshTiles("roads");
+        // Re-fetch the roads source tiles every 15 seconds so traffic levels
+        // (traffic_level / speed_kmh) stay current. refreshTiles reloads only
+        // the given source, so green areas, water and the background are not
+        // re-requested. nginx already serves /tiles/ with no-cache headers, so
+        // the browser will not return stale tiles from its HTTP cache.
+        map.on("load", () => {
+            setInterval(() => {
+                // Skip refreshes while the tab is hidden to save bandwidth.
+                if (!document.hidden) {
+                    map.refreshTiles("roads");
+                }
+            }, 15000);
+        });
+
+        // Traffic level -> label + color, matching the map line colors.
+        const TRAFFIC_LABELS = {
+            0: ["Free flow", "#24a148"],
+            1: ["Slow", "#f1c21b"],
+            2: ["Heavy", "#ff832b"],
+            3: ["Jammed", "#da1e28"]
+        };
+
+        // Last 8 speed readings for one street from ClickHouse, via the nginx
+        // /clickhouse/ proxy (same-origin; nginx injects the credentials).
+        // {street_id:Int64} is a bound query parameter (sent as
+        // param_street_id), so the osm_id coming from the tile can never be
+        // injected into the SQL text. Rows come back newest first.
+        async function fetchStreetHistory(osmId) {
+            const query =
+                "SELECT timestamp, speed_kmh " +
+                "FROM tbl_gps_processed_aggregated " +
+                "WHERE street_id = {street_id:Int64} " +
+                "ORDER BY timestamp DESC LIMIT 16 " +
+                "FORMAT JSON";
+
+            const res = await fetch(
+                "/clickhouse/?param_street_id=" + encodeURIComponent(osmId) +
+                "&query=" + encodeURIComponent(query)
+            );
+            if (!res.ok) {
+                throw new Error("ClickHouse HTTP " + res.status);
+            }
+            return (await res.json()).data;
         }
-    }, 15000);
-});
 
-map.on("click", "traffic", (event) => {
-    const feature = event.features[0];
-    const p = feature.properties;
+        // Tiny inline SVG line chart of the last readings, oldest -> newest
+        // (left -> right), with a y-axis (km/h) and x-axis (time of the
+        // oldest/newest reading). Returns "" for 0 or 1 rows — a trend needs
+        // at least two points to be meaningful. Y-scale spans the data
+        // min/max so small changes stay visible.
+        function speedChart(rows, color) {
+            if (rows.length < 2) {
+                return "";
+            }
+            const speeds = rows.map((r) => Number(r.speed_kmh)).reverse();
+            // Times oldest -> newest, matching the reversed speeds.
+            const times = rows.map((r) => r.timestamp).reverse();
 
-    new maplibregl.Popup()
-        .setLngLat(event.lngLat)
-        .setHTML(`
-            <strong>${p.name_fa || p.name || "Unnamed road"}</strong><br>
-            OSM way: ${p.osm_id}<br>
-            Class: ${p.highway || "unknown"}<br>
-            Speed: ${p.speed_kmh ?? "No data"} km/h<br>
-            Traffic level: ${p.traffic_level ?? "No data"}
-        `)
-        .addTo(map);
-});
+            const W = 220, H = 120;
+            // Margins leave room for the axis tick labels and titles.
+            const M = { top: 10, right: 8, bottom: 26, left: 34 };
+            const plotW = W - M.left - M.right;
+            const plotH = H - M.top - M.bottom;
 
-map.on("mouseenter", "traffic", () => {
-    map.getCanvas().style.cursor = "pointer";
-});
+            const min = Math.min(...speeds);
+            const max = Math.max(...speeds);
+            // Pad a flat series (all speeds equal) so the line sits mid-chart
+            // instead of on the x-axis.
+            const lo = min === max ? min - 1 : min;
+            const hi = min === max ? max + 1 : max;
+            const span = hi - lo;
+            const x = (i) => M.left + (i * plotW) / (speeds.length - 1);
+            const y = (v) => M.top + plotH - ((v - lo) / span) * plotH;
 
-map.on("mouseleave", "traffic", () => {
-    map.getCanvas().style.cursor = "";
-});
-</script>
+            const points = speeds
+                .map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+                .join(" ");
+            const dots = speeds
+                .map((v, i) =>
+                    `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="2.2" fill="${color}" />`
+                )
+                .join("");
+
+            // Y ticks at min / mid / max; one decimal when the range is small
+            // so the labels don't collapse into duplicates.
+            const yLabel = (v) => (max - min < 5 ? v.toFixed(1) : Math.round(v));
+            const yTicks = [lo, (lo + hi) / 2, hi]
+                .map((v) => {
+                    const ty = y(v).toFixed(1);
+                    return `
+                <line x1="${M.left - 3}" y1="${ty}" x2="${M.left}" y2="${ty}"
+                    stroke="#999" stroke-width="1" />
+                <text x="${M.left - 5}" y="${ty}" dy="0.32em"
+                    text-anchor="end" font-size="9" fill="#666">${yLabel(v)}</text>`;
+                })
+                .join("");
+
+            // X ticks: time (HH:MM) of the oldest and newest readings.
+            const fmt = (ts) => ts.slice(11, 16); // "YYYY-MM-DD HH:MM:SS" -> "HH:MM"
+            const xTicks = [0, times.length - 1]
+                .map((i) => `
+                <text x="${x(i).toFixed(1)}" y="${M.top + plotH + 12}"
+                    text-anchor="${i === 0 ? "start" : "end"}"
+                    font-size="9" fill="#666">${fmt(times[i])}</text>`)
+                .join("");
+
+            const axisColor = "#999";
+            const labelColor = "#666";
+            const midY = M.top + plotH / 2;
+            const midX = M.left + plotW / 2;
+
+            return `
+            <svg width="${W}" height="${H}" role="img" aria-label="Speed trend">
+                <!-- axes -->
+                <line x1="${M.left}" y1="${M.top}" x2="${M.left}" y2="${M.top + plotH}"
+                    stroke="${axisColor}" stroke-width="1" />
+                <line x1="${M.left}" y1="${M.top + plotH}" x2="${M.left + plotW}" y2="${M.top + plotH}"
+                    stroke="${axisColor}" stroke-width="1" />
+                ${yTicks}
+                ${xTicks}
+                <!-- axis titles -->
+                <text x="${M.left - 26}" y="${midY}" font-size="9" fill="${labelColor}"
+                    text-anchor="middle" transform="rotate(-90 ${M.left - 26} ${midY})">km/h</text>
+                <text x="${midX}" y="${H - 2}" font-size="9" fill="${labelColor}"
+                    text-anchor="middle">time</text>
+                <polyline points="${points}" fill="none"
+                    stroke="${color}" stroke-width="2" stroke-linejoin="round" />
+                ${dots}
+            </svg>`;
+        }
+
+        map.on("click", "traffic", (event) => {
+            const feature = event.features[0];
+            const p = feature.properties;
+            const name = p.name_fa || p.name || "Unnamed road";
+
+            const level = TRAFFIC_LABELS[Number(p.traffic_level)];
+            const levelHtml = level
+                ? `<span style="color:${level[1]}">●</span> ${level[0]}`
+                : "No data";
+            const lineColor = level ? level[1] : "#8d8d8d";
+
+            // Current speed as '#,##0.0': thousands separator + exactly one
+            // decimal (e.g. 1234.56 -> "1,234.6", 21 -> "21.0").
+            const speedHtml = p.speed_kmh == null
+                ? "No data"
+                : Number(p.speed_kmh).toLocaleString("en-US", {
+                      minimumFractionDigits: 1,
+                      maximumFractionDigits: 1
+                  });
+
+            const html = (chartHtml) => `
+            <span class="popup-title">${name}</span>
+            <div class="popup-grid">
+                <div class="grid-title">Speed</div>
+                <div class="grid-title">Traffic</div>
+                <div class="grid-value">${speedHtml} km/h</div>
+                <div class="grid-value">${levelHtml}</div>
+            </div>
+            ${chartHtml}`;
+
+            const popup = new maplibregl.Popup()
+                .setLngLat(event.lngLat)
+                .setHTML(html("<em>loading trend…</em>"))
+                .addTo(map);
+
+            fetchStreetHistory(Number(p.osm_id))
+                .then((rows) => {
+                    if (!popup.isOpen()) return; // closed or replaced already
+                    if (rows.length === 0) {
+                        // No readings at all: show only the street name.
+                        popup.setHTML(`<span class="popup-title">${name}</span>`);
+                        return;
+                    }
+                    popup.setHTML(html(speedChart(rows, lineColor)));
+                })
+                .catch((err) => {
+                    console.error("Failed to load street history:", err);
+                    if (popup.isOpen()) {
+                        popup.setHTML(html("<em>Trend unavailable</em>"));
+                    }
+                });
+        });
+
+        map.on("mouseenter", "traffic", () => {
+            map.getCanvas().style.cursor = "pointer";
+        });
+
+        map.on("mouseleave", "traffic", () => {
+            map.getCanvas().style.cursor = "";
+        });
+    </script>
 </body>
+
 </html>
