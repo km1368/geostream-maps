@@ -27,7 +27,7 @@ from sedona.spark import SedonaContext
 
 # Inside the compose network, Redpanda is reachable as `redpanda-0:29092`
 # (internal listener). `localhost:9092` only works from the host.
-KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "redpanda-0:29092")
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "redpanda-1:29092")
 RAW_TOPIC = os.environ.get("RAW_TOPIC", "gps-raw")
 PROCESSED_TOPIC = os.environ.get("PROCESSED_TOPIC", "gps-processed")
 CHECKPOINT = os.environ.get("CHECKPOINT_LOCATION",
