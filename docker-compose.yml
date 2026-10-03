@@ -215,7 +215,7 @@ services:
       - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       # Vazirmatn TTF served at /fonts/ for the HTML UI (legend, popups);
       # the same directory feeds Martin's map-label glyphs.
-      - ./fonts:/fonts:ro
+      - ./web/fonts:/fonts:ro
     mem_limit: 1g
     cpus: "1"
     networks:
