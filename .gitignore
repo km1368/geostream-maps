@@ -18,5 +18,7 @@ data/postgres/
 # text 
 *.txt 
 
-# instructions 
+# system folders 
 /.github/
+/.venv/
+

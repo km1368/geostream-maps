@@ -14,7 +14,7 @@ osm2pgsql \
     --create \
     --slim \
     --output flex \
-    --style /config/roads.lua \
+    --style /scripts/road-styles-for-import.lua \
     --database "$PGDATABASE" \
     --host "$PGHOST" \
     --port "$PGPORT" \
