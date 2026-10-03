@@ -1,0 +1,4 @@
+# Keep shell scripts LF-only — CRLF breaks them inside Linux containers
+# (e.g. `set: line 2: illegal option -` from `set -eu\r`).
+*.sh text eol=lf
+*.lua text eol=lf

@@ -4,15 +4,15 @@ A minimal "Google Maps" clone for Tehran: live street-level traffic colors on a 
 
 ## Data Engineering Stack
 
-| Component              | Role                                                                                                                                                         |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Postgres + PostGIS** | Street geometry + **latest status** of each street: current duration, current baseline duration, current color on the map.                                   |
-| **Redpanda**           | Real-time data broker (`gps-raw` and `gps-processed` topics).                                                                                               |
-| **Spark + Sedona**     | Streaming job: flags inaccurate/invalid GPS pings, spatial-joins each valid ping to a street, publishes enriched events back to Redpanda.                    |
+| Component              | Role                                                                                                                                                                                |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Postgres + PostGIS** | Street geometry + **latest status** of each street: current duration, current baseline duration, current color on the map.                                                          |
+| **Redpanda**           | Real-time data broker (`gps-raw` and `gps-processed` topics).                                                                                                                       |
+| **Spark + Sedona**     | Streaming job: flags inaccurate/invalid GPS pings, spatial-joins each valid ping to a street, publishes enriched events back to Redpanda.                                           |
 | **ClickHouse**         | Recent speed history per street (shown on click). Kafka engine table + materialized view land each enriched ping; TTL keeps only 6 hours of data. Receives live data from Redpanda. |
-| **MinIO (lakehouse)**  | Raw immutable events; input for the nightly next-day traffic prediction job.                                                                                 |
-| **Airflow**            | Orchestrates the hourly OSM refresh (download latest Iran extract → extract Tehran → load PostGIS) and the nightly prediction jobs.                          |
-| **Python**             | Generates the live GPS stream (coordinates + speed of users).                                                                                                |
+| **MinIO (lakehouse)**  | Raw immutable events; input for the nightly next-day traffic prediction job.                                                                                                        |
+| **Airflow**            | Orchestrates the hourly OSM refresh (download latest Iran extract → extract Tehran → load PostGIS) and the nightly prediction jobs.                                                 |
+| **Python**             | Generates the live GPS stream (coordinates + speed of users).                                                                                                                       |
 
 ### Data flow
 
@@ -50,9 +50,31 @@ flowchart TD
 
 ## Initialization
 
-1. Download Iran's raw OpenStreetMap data from the internet (Geofabrik `iran-latest.osm.pbf`).
-2. Extract Tehran's raw data so the dataset doesn't get exceedingly large for a final project.
-3. Inject Tehran's raw data into Postgres + PostGIS (`osm2pgsql` + post-import SQL for traffic columns and indexes).
+Download a Iran's raw open streets map data into `./data/`
+
+```bash
+wget https://download.geofabrik.de/asia/iran-latest.osm.pbf
+```
+
+Extract Tehran's raw data so the dataset doesn't get exceedingly large for a final project.
+
+```bash
+osmium extract \
+  --bbox 51.05,35.50,51.65,35.95 \
+  --strategy complete_ways \
+  iran-latest.osm.pbf \
+  --output data/tehran.osm.pbf
+```
+
+Run the following code to inject Tehran's raw data into Postgres + PostGIS (via `osm2pgsql` ) and create columns and indexes for live traffic). 
+
+```bash
+docker compose up -d postgres-1; 
+docker compose --profile import run --rm import-map-to-postgres; 
+docker compose --profile import run --rm --no-deps create-postgres-columns; 
+docker compose up -d;
+
+```
 
 ```mermaid
 flowchart TD
