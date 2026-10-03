@@ -1,8 +1,9 @@
 name: mahyaar-maps
 
 services:
-  db:
+  postgres-1:
     image: docker.arvancloud.ir/postgis/postgis:16-3.5
+    container_name: postgres-1
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -21,8 +22,8 @@ services:
     networks:
       - mapnet
 
-  redpanda-0:
-    container_name: redpanda-0
+  redpanda-1:
+    container_name: redpanda-1
     image: docker.arvancloud.ir/redpandadata/redpanda:v26.2.2
     command:
       - redpanda
@@ -31,7 +32,7 @@ services:
       - --memory 1G
       - --reserve-memory 0M
       - --kafka-addr internal://0.0.0.0:29092,external://0.0.0.0:9092
-      - --advertise-kafka-addr internal://redpanda-0:29092,external://localhost:9092
+      - --advertise-kafka-addr internal://redpanda-1:29092,external://localhost:9092
     ports:
       - "9092:9092"
     mem_limit: 2g
@@ -48,63 +49,63 @@ services:
       CONFIG_FILEPATH: /tmp/config.yml
       CONSOLE_CONFIG_FILE: |
         kafka:
-          brokers: ["redpanda-0:29092"]
+          brokers: ["redpanda-1:29092"]
         redpanda:
           adminApi:
             enabled: true
-            urls: ["http://redpanda-0:9644"]
+            urls: ["http://redpanda-1:9644"]
     ports:
       - "9300:8080"
     depends_on:
-      - redpanda-0
+      - redpanda-1
     mem_limit: 1g
     cpus: "1"
     networks:
       - mapnet
 
   # One-time/on-demand importer. It does not remain running.
-  importer:
+  import-map-to-postgres:
     image: docker.arvancloud.ir/iboates/osm2pgsql:2.3.1
     profiles:
       - import
     depends_on:
-      db:
+      postgres-1:
         condition: service_healthy
     environment:
-      PGHOST: db
+      PGHOST: postgres-1
       PGPORT: 5432
       PGDATABASE: ${POSTGRES_DB}
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
-    entrypoint: ["/bin/sh", "/scripts/import.sh"]
+    entrypoint: ["/bin/sh", "/scripts/import-map-to-postgres-tables.sh"]
     volumes:
       - ./data:/data:ro
-      - ./config:/config:ro
-      - ./scripts:/scripts:ro
+      # - ./postgres/config:/config:ro
+      - ./postgres:/scripts:ro
     networks:
       - mapnet
 
   # Applies post-import SQL (columns + indexes). Uses the PostGIS image
   # because the osm2pgsql image has no psql client.
-  post_import:
+  create-postgres-columns:
     image: docker.arvancloud.ir/postgis/postgis:16-3.5
     profiles:
       - import
     depends_on:
-      db:
+      postgres-1:
         condition: service_healthy
-      importer:
+      import-map-to-postgres:
         condition: service_completed_successfully
     environment:
-      PGHOST: db
+      PGHOST: postgres-1
       PGPORT: "5432"
       PGDATABASE: ${POSTGRES_DB}
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
     entrypoint:
-      ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/scripts/post_import.sql"]
+      ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/scripts/create-postgres-columns.sql"]
     volumes:
-      - ./scripts:/scripts:ro
+      - ./postgres:/scripts:ro
     networks:
       - mapnet
 
@@ -113,7 +114,7 @@ services:
     # image: ghcr.io/maplibre/martin:1.16.1
     restart: unless-stopped
     depends_on:
-      db:
+      postgres-1:
         condition: service_healthy
     # Config file disables Martin's in-memory tile cache (cache: disable).
     # Without it, tiles are generated once and served stale forever, so the
@@ -129,18 +130,19 @@ services:
       - "--font"
       - "/fonts"
     volumes:
-      - ./fonts:/fonts:ro
-      - ./config/martin.yaml:/config/martin.yaml:ro
+      - ./web/fonts:/fonts:ro
+      - ./web/martin.yaml:/config/martin.yaml:ro
     mem_limit: 1g
     cpus: "1"
     networks:
       - mapnet
 
-  # Spark + Sedona playground: 1 master + 1 worker + JupyterLab (no token).
-  # Notebooks live in ./sedona/notebooks, mounted at the image's /opt/workspace.
-  sedona:
+  # Spark + Sedona: 1 master + 1 worker + JupyterLab .
+  sedona-jupyter:
     image: docker.arvancloud.ir/apache/sedona:1.9.1
-    restart: unless-stopped
+    restart: unless-stopped 
+    profiles:
+      - sedona-jupyter
     environment:
       DRIVER_MEM: 2g
       EXECUTOR_MEM: 2g
@@ -166,15 +168,15 @@ services:
     image: docker.arvancloud.ir/apache/sedona:1.9.1
     restart: unless-stopped
     depends_on:
-      - redpanda-0
-      - db
+      - redpanda-1
+      - postgres-1
     environment:
       DRIVER_MEM: 1g
       EXECUTOR_MEM: 1g
       # spark-submit needs a plain python, not jupyter (the image default).
       PYSPARK_DRIVER_PYTHON: python3
       PYSPARK_PYTHON: python3
-      KAFKA_BOOTSTRAP: redpanda-0:29092
+      KAFKA_BOOTSTRAP: redpanda-1:29092
       RAW_TOPIC: gps-raw
       PROCESSED_TOPIC: gps-processed
       MAX_RADIUS_ERROR_M: "40"
@@ -219,7 +221,7 @@ services:
     networks:
       - mapnet
 
-  clickhouse:
+  clickhouse-1:
     image: docker.arvancloud.ir/clickhouse/clickhouse-server:26.3
     container_name: clickhouse
     environment:

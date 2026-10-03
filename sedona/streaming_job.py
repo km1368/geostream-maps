@@ -39,7 +39,7 @@ MAX_RADIUS_ERROR_M = float(os.environ.get("MAX_RADIUS_ERROR_M", "32"))
 # osm2pgsql). Credentials come from the container environment.
 JDBC_URL = os.environ.get(
     "POSTGRES_JDBC_URL",
-    f"jdbc:postgresql://db:5432/{os.environ.get('POSTGRES_DB', 'osm')}",
+    f"jdbc:postgresql://postgres-1:5432/{os.environ.get('POSTGRES_DB', 'osm')}",
 )
 JDBC_PROPS = {
     "user": os.environ.get("POSTGRES_USER", "osm"),
