@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS kfk_gps_processed_aggregated
 )
 ENGINE = Kafka
 SETTINGS
-    kafka_broker_list = 'redpanda-0:29092',
+    kafka_broker_list = 'redpanda-1:29092',
     kafka_topic_list = 'gps-processed',
     kafka_group_name = 'clickhouse-gps-processed',
     kafka_format = 'JSONEachRow',
