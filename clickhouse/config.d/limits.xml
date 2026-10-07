@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!--
   Caps memory/threads so ClickHouse stays inside the container's
-  mem_limit: 3g / cpus: "1" (see the clickhouse service in
+  mem_limit: 512m / cpus: "0.5" (see the clickhouse service in
   docker-compose.yml). Without these the server happily grabs far more
   than the limit and gets OOM-killed.
 -->

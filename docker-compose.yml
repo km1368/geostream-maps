@@ -17,8 +17,8 @@ services:
       retries: 20
     ports:
       - "15432:5432"
-    mem_limit: 1g
-    cpus: "1"
+    mem_limit: 512m
+    cpus: "0.5"
     networks:
       - mapnet
 
@@ -35,7 +35,7 @@ services:
       - --advertise-kafka-addr internal://redpanda-1:29092,external://localhost:9092
     ports:
       - "9092:9092"
-    mem_limit: 2g
+    mem_limit: 1.5g
     cpus: "1"
     networks:
       - mapnet
@@ -58,12 +58,11 @@ services:
       - "9300:8080"
     depends_on:
       - redpanda-1
-    mem_limit: 1g
-    cpus: "1"
+    mem_limit: 128m
+    cpus: "0.25"
     networks:
       - mapnet
 
-  # One-time/on-demand importer. It does not remain running.
   import-map-to-postgres:
     image: docker.arvancloud.ir/iboates/osm2pgsql:2.3.1
     profiles:
@@ -82,11 +81,11 @@ services:
       - ./data:/data:ro
       # - ./postgres/config:/config:ro
       - ./postgres:/scripts:ro
+    mem_limit: 1g
+    cpus: "2"
     networks:
       - mapnet
 
-  # Applies post-import SQL (columns + indexes). Uses the PostGIS image
-  # because the osm2pgsql image has no psql client.
   create-postgres-columns:
     image: docker.arvancloud.ir/postgis/postgis:16-3.5
     profiles:
@@ -103,9 +102,17 @@ services:
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
     entrypoint:
-      ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/scripts/create-postgres-columns.sql"]
+      [
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-f",
+        "/scripts/create-postgres-columns.sql",
+      ]
     volumes:
       - ./postgres:/scripts:ro
+    mem_limit: 128m
+    cpus: "0.25"
     networks:
       - mapnet
 
@@ -116,10 +123,6 @@ services:
     depends_on:
       postgres-1:
         condition: service_healthy
-    # Config file disables Martin's in-memory tile cache (cache: disable).
-    # Without it, tiles are generated once and served stale forever, so the
-    # traffic colors on the map would never change. The connection string
-    # inside the config uses the same POSTGRES_* env vars.
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -132,15 +135,14 @@ services:
     volumes:
       - ./web/fonts:/fonts:ro
       - ./web/martin.yaml:/config/martin.yaml:ro
-    mem_limit: 1g
-    cpus: "1"
+    mem_limit: 64m
+    cpus: "0.25"
     networks:
       - mapnet
 
-  # Spark + Sedona: 1 master + 1 worker + JupyterLab .
   sedona-jupyter:
     image: docker.arvancloud.ir/apache/sedona:1.9.1
-    restart: unless-stopped 
+    restart: unless-stopped
     profiles:
       - sedona-jupyter
     environment:
@@ -156,14 +158,11 @@ services:
     volumes:
       - ./sedona/notebooks:/opt/workspace:rw
       - sedona_ivy:/root/.ivy2
+    mem_limit: 3g
+    cpus: "2"
     networks:
       - mapnet
 
-  # Spark Structured Streaming job: reads GPS pings from Redpanda's `gps-raw`
-  # topic, flags pings with a large GPS accuracy error (radius_error_m > 40 m)
-  # as invalid, spatial-joins each ping to its nearest street (PostGIS `roads`
-  # table) and adds `street_id`, then writes them back to Redpanda on
-  # `gps-processed`.
   sedona-stream:
     image: docker.arvancloud.ir/apache/sedona:1.9.1
     restart: unless-stopped
@@ -200,6 +199,8 @@ services:
       - ./sedona/streaming_job.py:/opt/workspace/streaming_job.py:ro
       - ./sedona/jars:/opt/workspace/jars:ro
       - sedona_checkpoints:/opt/workspace/.checkpoints
+    mem_limit: 2.5g
+    cpus: "2"
     networks:
       - mapnet
 
@@ -216,8 +217,8 @@ services:
       # Vazirmatn TTF served at /fonts/ for the HTML UI (legend, popups);
       # the same directory feeds Martin's map-label glyphs.
       - ./web/fonts:/fonts:ro
-    mem_limit: 1g
-    cpus: "1"
+    mem_limit: 64m
+    cpus: "0.1"
     networks:
       - mapnet
 
@@ -247,8 +248,21 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
-    mem_limit: 3g
-    cpus: "1"
+    mem_limit: 512m
+    cpus: "0.5"
+    networks:
+      - mapnet
+
+  generator:
+    build: ./generator
+    image: mahyaar-maps-generator
+    restart: unless-stopped
+    depends_on:
+      - redpanda-1
+    environment:
+      KAFKA_BOOTSTRAP: redpanda-1:29092
+    mem_limit: 128m
+    cpus: "0.25"
     networks:
       - mapnet
 
