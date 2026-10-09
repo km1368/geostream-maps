@@ -1,5 +1,3 @@
-
-
 # %% import libraries
 
 import os
@@ -7,7 +5,11 @@ from pyspark.sql import SparkSession, Window
 from pyspark.sql import functions as F
 from sedona.spark import SedonaContext
 
-# %% create connections
+# %% create connections & configurations
+
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "redpanda-1:29092")
+RAW_TOPIC = os.environ.get("RAW_TOPIC", "gps-raw")
+PROCESSED_TOPIC = os.environ.get("PROCESSED_TOPIC", "gps-processed")
 
 JDBC_URL = os.environ.get(
     "POSTGRES_JDBC_URL",
@@ -43,7 +45,6 @@ roads = (
 )
 
 # %% update database
-
 
 def update_roads_traffic(stats_df):
 
@@ -151,26 +152,30 @@ def enrich_batch(batch_df, batch_df_id):
         .persist()
     )
 
-    # convert to json
     try:
-        enriched.select(
+        # Publish enriched pings for downstream consumers, including lakehouse_job.py.
+        processed = enriched.select(
             F.to_json(
                 F.struct(
-                    F.col("timestamp"),
-                    F.col("date"),
-                    F.col("hour"),
-                    F.col("latitude"),
-                    F.col("longitude"),
-                    F.col("speed_kmh"),
-                    F.col("radius_error_m"),
-                    F.col("is_valid"),
-                    F.col("street_id"),
+                    "timestamp",
+                    "latitude",
+                    "longitude",
+                    "speed_kmh",
+                    "radius_error_m",
+                    "date",
+                    "hour",
+                    "is_valid",
+                    "street_id",
                 )
             ).alias("value")
-        ).write.format("kafka") \
-            .option("kafka.bootstrap.servers", "redpanda-1:29092") \
-            .option("topic", "gps-processed") \
+        )
+        (
+            processed.write
+            .format("kafka")
+            .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
+            .option("topic", PROCESSED_TOPIC)
             .save()
+        )
 
         # groupBy street_id
         ratio = F.col("speed_kmh") / 60   # free flow speed = 60 km/h
@@ -197,8 +202,8 @@ def enrich_batch(batch_df, batch_df_id):
 
 query = (
     spark.readStream.format("kafka")
-    .option("kafka.bootstrap.servers", "redpanda-1:29092")
-    .option("subscribe", "gps-raw")
+    .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
+    .option("subscribe", RAW_TOPIC)
     .option("startingOffsets", "latest")
     .option("failOnDataLoss", "false")
     .load()
