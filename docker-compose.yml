@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -157,18 +157,54 @@ services:
       - "8087:8081" # Spark worker UI
     volumes:
       - ./sedona/notebooks:/opt/workspace:rw
-      - sedona_ivy:/root/.ivy2
+      - sedona-ivy:/root/.ivy2
     mem_limit: 3g
     cpus: "2"
     networks:
       - mapnet
 
+  # one-shot: creates the lakehouse bucket if missing. Idempotent, so it runs
+  # (for ~2-5 s) on every `up -d` — mirrors the create-postgres-columns
+  # pattern. sedona-stream waits for it so a fresh clone works with plain
+  # `docker compose up -d`.
+  minio-init:
+    image: docker.arvancloud.ir/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      - minio-1
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint:
+      - /bin/sh
+      - -c
+      # retry until MinIO is accepting connections, then create the bucket
+      - |
+        i=0; until mc alias set lakehouse-init http://minio-1:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+          i=$$((i+1));
+          if [ "$$i" -ge 30 ]; then echo "minio-init: MinIO unreachable, giving up"; exit 1; fi
+          echo "minio-init: waiting for MinIO..."; sleep 2;
+        done
+        mc mb --ignore-existing lakehouse-init/lakehouse
+    mem_limit: 64m
+    cpus: "0.1"
+    networks:
+      - mapnet
+
   sedona-stream:
-    image: docker.arvancloud.ir/apache/sedona:1.9.1
+    # custom image: base sedona + connector/driver jars downloaded at BUILD
+    # time (see sedona/Dockerfile) — no ./sedona/jars bind mount needed
+    build: ./sedona
+    image: mahyaar-maps-sedona-stream
     restart: unless-stopped
     depends_on:
-      - redpanda-1
-      - postgres-1
+      redpanda-1:
+        condition: service_started
+      postgres-1:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      polaris-init:
+        condition: service_completed_successfully
     environment:
       DRIVER_MEM: 1g
       EXECUTOR_MEM: 1g
@@ -184,22 +220,32 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    command:
-      - /opt/spark/bin/spark-submit
-      - --master
-      - local[2]
-      # Kafka connector for Spark 4.0 / Scala 2.13 + Postgres JDBC driver,
-      # pre-fetched into ./sedona/jars (mounted below). Using --jars instead
-      # of --packages avoids a runtime Ivy download from Maven Central, which
-      # hangs indefinitely on some networks (TLS handshake black-hole).
-      - --jars
-      - /opt/workspace/jars/spark-sql-kafka-0-10_2.13-4.0.1.jar,/opt/workspace/jars/spark-token-provider-kafka-0-10_2.13-4.0.1.jar,/opt/workspace/jars/kafka-clients-3.9.1.jar,/opt/workspace/jars/commons-pool2-2.12.0.jar,/opt/workspace/jars/postgresql-42.7.7.jar
-      - /opt/workspace/streaming_job.py
+      # lakehouse consumer (lakehouse_job.py) — MinIO S3A endpoint + creds
+      MINIO_ENDPOINT: minio-1:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: us-east-1
+      LAKEHOUSE_BUCKET: lakehouse
+      LAKEHOUSE_TRIGGER: "60 seconds"
+      # Polaris REST catalog (lakehouse_job.py) — must match the pinned root
+      # credentials in .env / polaris-1's POLARIS_BOOTSTRAP_CREDENTIALS
+      POLARIS_URI: http://polaris-1:8181/api/catalog
+      POLARIS_CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID}:${POLARIS_ROOT_CLIENT_SECRET}
+    # start-jobs.sh launches BOTH streaming jobs (main pipeline + lakehouse
+    # consumer) as separate spark-submits; see the script for the lifecycle
+    # semantics. Jars are baked into the image at build time (sedona/Dockerfile
+    # downloads them from Maven Central): using --jars instead of --packages
+    # avoids a runtime Ivy download from Maven Central, which hangs
+    # indefinitely on some networks (TLS handshake black-hole).
+    # The script/py bind mounts below are optional: they enable the
+    # edit-and-restart workflow (docker restart mahyaar-maps-sedona-stream-1,
+    # no rebuild). Remove them to run purely from the image.
     volumes:
       - ./sedona/streaming_job.py:/opt/workspace/streaming_job.py:ro
-      - ./sedona/jars:/opt/workspace/jars:ro
-      - sedona_checkpoints:/opt/workspace/.checkpoints
-    mem_limit: 2.5g
+      - ./sedona/lakehouse_job.py:/opt/workspace/lakehouse_job.py:ro
+      - ./sedona/start-jobs.sh:/opt/workspace/start-jobs.sh:ro
+      - sedona-checkpoints:/opt/workspace/.checkpoints
+    mem_limit: 4g
     cpus: "2"
     networks:
       - mapnet
@@ -224,7 +270,7 @@ services:
 
   clickhouse-1:
     image: docker.arvancloud.ir/clickhouse/clickhouse-server:26.3
-    container_name: clickhouse
+    container_name: clickhouse-1
     environment:
       # Without these the image restricts 'default' to container-localhost only,
       # so host connections fail with "Authentication failed" (code 194).
@@ -261,16 +307,116 @@ services:
       - redpanda-1
     environment:
       KAFKA_BOOTSTRAP: redpanda-1:29092
+      TZ: Asia/Tehran
     mem_limit: 128m
     cpus: "0.25"
     networks:
       - mapnet
 
+  minio-1:
+    image: docker.arvancloud.ir/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: minio-1
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_DOMAIN=storage
+      - MINIO_REGION_NAME=us-east-1
+      - MINIO_REGION=us-east-1
+    networks:
+      mapnet:
+    ports:
+      - 19000:9000    # S3 API 
+      - 19001:9001    # Web UI 
+    volumes:
+      - minio-data:/data
+    command: ["server", "/data", "--console-address", ":9001"]
+    mem_limit: 0.5g
+    cpus: "0.25"
+
+  polaris-1:
+    image: docker.arvancloud.ir/apache/polaris:1.8.0
+    # image: ghcr.io/apache/polaris:1.8.0
+    container_name: polaris-1
+    ports:
+      - "8181:8181" # Polaris REST API
+    environment:
+      - JAVA_TOOL_OPTIONS=-Dpolaris.bootstrap.root=true   # Optional: Helps make startup logs clearer
+      # Pin the root principal credentials — without this, Polaris generates a
+      # RANDOM pair at every bootstrap (in-memory persistence) and prints it to
+      # stdout. Format: <realm>,<clientId>,<clientSecret>
+      - POLARIS_BOOTSTRAP_CREDENTIALS=POLARIS,${POLARIS_ROOT_CLIENT_ID},${POLARIS_ROOT_CLIENT_SECRET}
+      - polaris.realm-context.realms=POLARIS
+      # Polaris itself needs MinIO creds to validate/purge table locations
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8182/q/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      mapnet:
+    mem_limit: 1g
+    cpus: "0.5"
+
+  # one-shot: bootstraps Polaris — mints a token with the pinned root
+  # credentials, creates the 'polaris' catalog (S3 storage config pointing at
+  # MinIO, no STS, path-style) and grants CATALOG_MANAGE_CONTENT to
+  # catalog_admin. Idempotent (skips on 409), so it runs on every `up -d` —
+  # mirrors the minio-init pattern. sedona-stream waits for it.
+  polaris-init:
+    image: docker.arvancloud.ir/curlimages/curl:8.12.1
+    depends_on:
+      polaris-1:
+        condition: service_healthy
+    environment:
+      POLARIS_ROOT_CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID}
+      POLARIS_ROOT_CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        POLARIS=http://polaris-1:8181
+        # retry until Polaris answers. NOTE: probe the UNAUTHENTICATED health
+        # endpoint on 8182 — /api/catalog/v1/config returns 401 and `curl -f`
+        # treats that as failure, which would burn the whole retry budget.
+        i=0; until curl -sf -o /dev/null "http://polaris-1:8182/q/health"; do
+          i=$$((i+1));
+          if [ "$$i" -ge 30 ]; then echo "polaris-init: Polaris unreachable, giving up"; exit 1; fi
+          echo "polaris-init: waiting for Polaris..."; sleep 2;
+        done
+        TOKEN=$$(curl -sf -X POST "$$POLARIS/api/catalog/v1/oauth/tokens" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          -d "grant_type=client_credentials&client_id=$$POLARIS_ROOT_CLIENT_ID&client_secret=$$POLARIS_ROOT_CLIENT_SECRET&scope=PRINCIPAL_ROLE:ALL" \
+          | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+        if [ -z "$$TOKEN" ]; then echo "polaris-init: token mint failed"; exit 1; fi
+        echo "polaris-init: creating catalog 'polaris' (MinIO storage)..."
+        # 409 = already exists → idempotent re-run
+        curl -s -o /tmp/resp.json -w "%{http_code}" -X POST "$$POLARIS/api/management/v1/catalogs" \
+          -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" -H "Polaris-Realm: POLARIS" \
+          -d '{"catalog":{"name":"polaris","type":"INTERNAL","readOnly":false,"properties":{"default-base-location":"s3://lakehouse/gps_processed"},"storageConfigInfo":{"storageType":"S3","endpoint":"http://minio-1:9000","endpointInternal":"http://minio-1:9000","stsUnavailable":true,"pathStyleAccess":true,"allowedLocations":["s3://lakehouse"]}}}' \
+          | { code=$$(cat); if [ "$$code" != 201 ] && [ "$$code" != 409 ]; then echo "polaris-init: catalog create failed ($$code):" && cat /tmp/resp.json && exit 1; fi; }
+        echo "polaris-init: granting CATALOG_MANAGE_CONTENT to catalog_admin..."
+        # Polaris answers 201 (created) or 200 (updated) for this PUT
+        curl -s -o /tmp/resp2.json -w "%{http_code}" -X PUT "$$POLARIS/api/management/v1/catalogs/polaris/catalog-roles/catalog_admin/grants" \
+          -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" -H "Polaris-Realm: POLARIS" \
+          -d '{"type":"catalog","privilege":"CATALOG_MANAGE_CONTENT"}' \
+          | { code=$$(cat); if [ "$$code" != 200 ] && [ "$$code" != 201 ] && [ "$$code" != 409 ]; then echo "polaris-init: grant failed ($$code):" && cat /tmp/resp2.json && exit 1; fi; }
+        echo "polaris-init: done."
+    mem_limit: 64m
+    cpus: "0.1"
+    networks:
+      - mapnet
+
 volumes:
-  postgres_data:
-  sedona_ivy:
-  sedona_checkpoints:
+  postgres-data:
+  sedona-ivy:
+  sedona-checkpoints:
   clickhouse-data:
+  minio-data: 
 
 networks:
   mapnet:

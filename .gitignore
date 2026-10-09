@@ -18,6 +18,8 @@ data/postgres/
 # text 
 *.txt 
 
+sedona/jars
+
 # system folders 
 /.github/
 /.venv/

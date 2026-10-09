@@ -441,7 +441,7 @@
                 "FORMAT JSON";
 
             const res = await fetch(
-                "/clickhouse/?param_street_id=" + encodeURIComponent(osmId) +
+                "/clickhouse-1/?param_street_id=" + encodeURIComponent(osmId) +
                 "&query=" + encodeURIComponent(query)
             );
             if (!res.ok) {
