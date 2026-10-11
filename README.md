@@ -11,7 +11,7 @@ A minimal "Google Maps" clone for Tehran: live street-level traffic colors on a 
 | **Spark + Sedona**     | Streaming job: flags inaccurate/invalid GPS pings, spatial-joins each valid ping to a street, publishes enriched events back to Redpanda.                                           |
 | **ClickHouse**         | Recent speed history per street (shown on click). Kafka engine table + materialized view land each enriched ping; TTL keeps only 6 hours of data. Receives live data from Redpanda. |
 | **MinIO (lakehouse)**  | Raw immutable events: every `gps-processed` ping landed in the Iceberg table `polaris.telemetry.gps_processed` (partitioned `date`/`hour`), managed by the Polaris REST catalog, data files on MinIO. Input for the next-day traffic prediction job (runs every 1 minute).                                      |
-| **Airflow**            | Orchestrates the hourly OSM refresh (download latest Iran extract → extract Tehran → load PostGIS) and the prediction jobs (every 1 minute).                                         |
+| **Airflow**            | Lightweight Airflow 3 service with LocalExecutor at `http://localhost:8081`; DAGs can be added under `airflow/dags/`. OSM refresh and prediction DAGs are not implemented yet. |
 | **Python**             | Generates the live GPS stream (coordinates + speed of users); runs as the compose service `generator` (TZ=Asia/Tehran so payload timestamps are Tehran-local).                                                                                                                       |
 
 ### Data flow

@@ -22,6 +22,51 @@ services:
     networks:
       - mapnet
 
+  airflow-db-init:
+    image: docker.arvancloud.ir/postgis/postgis:16-3.5
+    depends_on:
+      postgres-1:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres-1
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if ! psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'airflow'" | grep -q 1; then
+          createdb -O "$$PGUSER" airflow
+        fi
+    mem_limit: 64m
+    cpus: "0.1"
+    networks:
+      - mapnet
+
+  airflow:
+    image: docker.arvancloud.ir/apache/airflow:3.3.1-python3.14
+    restart: unless-stopped
+    depends_on:
+      airflow-db-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__PARALLELISM: "2"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-1:5432/airflow
+    command: ["standalone"]
+    ports:
+      - "8081:8080"
+    volumes:
+      - airflow-data:/opt/airflow
+      - ./airflow/dags:/opt/airflow/dags:ro
+    mem_limit: 1536m
+    cpus: "0.5"
+    networks:
+      - mapnet
+
   redpanda-1:
     container_name: redpanda-1
     image: docker.arvancloud.ir/redpandadata/redpanda:v26.2.2
@@ -364,6 +409,7 @@ volumes:
   sedona-checkpoints:
   clickhouse-data:
   minio-data: 
+  airflow-data:
 
 networks:
   mapnet:
