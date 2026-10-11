@@ -45,10 +45,15 @@ services:
       - mapnet
 
   airflow:
-    image: docker.arvancloud.ir/apache/airflow:3.3.1-python3.14
+    build: ./airflow
+    image: mahyaar-maps-airflow
     restart: unless-stopped
     depends_on:
       airflow-db-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      polaris-init:
         condition: service_completed_successfully
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -56,6 +61,20 @@ services:
       AIRFLOW__CORE__PARALLELISM: "2"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-1:5432/airflow
+      PREDICTION_PGHOST: postgres-1
+      PREDICTION_PGPORT: "5432"
+      PREDICTION_PGDATABASE: ${POSTGRES_DB}
+      PREDICTION_PGUSER: ${POSTGRES_USER}
+      PREDICTION_PGPASSWORD: ${POSTGRES_PASSWORD}
+      POLARIS_URI: http://polaris-1:8181/api/catalog
+      POLARIS_CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID}:${POLARIS_ROOT_CLIENT_SECRET}
+      POLARIS_CATALOG: polaris
+      POLARIS_NAMESPACE: telemetry
+      POLARIS_TABLE: gps_processed
+      MINIO_ENDPOINT: http://minio-1:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: us-east-1
     command: ["standalone"]
     ports:
       - "8081:8080"
