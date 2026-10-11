@@ -163,10 +163,6 @@ services:
     networks:
       - mapnet
 
-  # one-shot: creates the lakehouse bucket if missing. Idempotent, so it runs
-  # (for ~2-5 s) on every `up -d` — mirrors the create-postgres-columns
-  # pattern. sedona-stream waits for it so a fresh clone works with plain
-  # `docker compose up -d`.
   minio-init:
     image: docker.arvancloud.ir/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
@@ -191,8 +187,6 @@ services:
       - mapnet
 
   sedona-stream:
-    # custom image: base sedona + connector/driver jars downloaded at BUILD
-    # time (see sedona/Dockerfile) — no ./sedona/jars bind mount needed
     build: ./sedona
     image: mahyaar-maps-sedona-stream
     restart: unless-stopped
@@ -208,7 +202,6 @@ services:
     environment:
       DRIVER_MEM: 1g
       EXECUTOR_MEM: 1g
-      # spark-submit needs a plain python, not jupyter (the image default).
       PYSPARK_DRIVER_PYTHON: python3
       PYSPARK_PYTHON: python3
       KAFKA_BOOTSTRAP: redpanda-1:29092
@@ -220,26 +213,14 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      # lakehouse consumer (lakehouse_job.py) — MinIO S3A endpoint + creds
       MINIO_ENDPOINT: minio-1:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       AWS_REGION: us-east-1
       LAKEHOUSE_BUCKET: lakehouse
       LAKEHOUSE_TRIGGER: "60 seconds"
-      # Polaris REST catalog (lakehouse_job.py) — must match the pinned root
-      # credentials in .env / polaris-1's POLARIS_BOOTSTRAP_CREDENTIALS
       POLARIS_URI: http://polaris-1:8181/api/catalog
       POLARIS_CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID}:${POLARIS_ROOT_CLIENT_SECRET}
-    # start-jobs.sh launches BOTH streaming jobs (main pipeline + lakehouse
-    # consumer) as separate spark-submits; see the script for the lifecycle
-    # semantics. Jars are baked into the image at build time (sedona/Dockerfile
-    # downloads them from Maven Central): using --jars instead of --packages
-    # avoids a runtime Ivy download from Maven Central, which hangs
-    # indefinitely on some networks (TLS handshake black-hole).
-    # The script/py bind mounts below are optional: they enable the
-    # edit-and-restart workflow (docker restart mahyaar-maps-sedona-stream-1,
-    # no rebuild). Remove them to run purely from the image.
     volumes:
       - ./sedona/streaming_job.py:/opt/workspace/streaming_job.py:ro
       - ./sedona/lakehouse_job.py:/opt/workspace/lakehouse_job.py:ro
@@ -361,11 +342,6 @@ services:
     mem_limit: 1g
     cpus: "0.5"
 
-  # one-shot: bootstraps Polaris — mints a token with the pinned root
-  # credentials, creates the 'polaris' catalog (S3 storage config pointing at
-  # MinIO, no STS, path-style) and grants CATALOG_MANAGE_CONTENT to
-  # catalog_admin. Idempotent (skips on 409), so it runs on every `up -d` —
-  # mirrors the minio-init pattern. sedona-stream waits for it.
   polaris-init:
     image: docker.arvancloud.ir/curlimages/curl:8.12.1
     depends_on:
@@ -374,38 +350,9 @@ services:
     environment:
       POLARIS_ROOT_CLIENT_ID: ${POLARIS_ROOT_CLIENT_ID}
       POLARIS_ROOT_CLIENT_SECRET: ${POLARIS_ROOT_CLIENT_SECRET}
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        set -e
-        POLARIS=http://polaris-1:8181
-        # retry until Polaris answers. NOTE: probe the UNAUTHENTICATED health
-        # endpoint on 8182 — /api/catalog/v1/config returns 401 and `curl -f`
-        # treats that as failure, which would burn the whole retry budget.
-        i=0; until curl -sf -o /dev/null "http://polaris-1:8182/q/health"; do
-          i=$$((i+1));
-          if [ "$$i" -ge 30 ]; then echo "polaris-init: Polaris unreachable, giving up"; exit 1; fi
-          echo "polaris-init: waiting for Polaris..."; sleep 2;
-        done
-        TOKEN=$$(curl -sf -X POST "$$POLARIS/api/catalog/v1/oauth/tokens" \
-          -H "Content-Type: application/x-www-form-urlencoded" \
-          -d "grant_type=client_credentials&client_id=$$POLARIS_ROOT_CLIENT_ID&client_secret=$$POLARIS_ROOT_CLIENT_SECRET&scope=PRINCIPAL_ROLE:ALL" \
-          | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
-        if [ -z "$$TOKEN" ]; then echo "polaris-init: token mint failed"; exit 1; fi
-        echo "polaris-init: creating catalog 'polaris' (MinIO storage)..."
-        # 409 = already exists → idempotent re-run
-        curl -s -o /tmp/resp.json -w "%{http_code}" -X POST "$$POLARIS/api/management/v1/catalogs" \
-          -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" -H "Polaris-Realm: POLARIS" \
-          -d '{"catalog":{"name":"polaris","type":"INTERNAL","readOnly":false,"properties":{"default-base-location":"s3://lakehouse/gps_processed"},"storageConfigInfo":{"storageType":"S3","endpoint":"http://minio-1:9000","endpointInternal":"http://minio-1:9000","stsUnavailable":true,"pathStyleAccess":true,"allowedLocations":["s3://lakehouse"]}}}' \
-          | { code=$$(cat); if [ "$$code" != 201 ] && [ "$$code" != 409 ]; then echo "polaris-init: catalog create failed ($$code):" && cat /tmp/resp.json && exit 1; fi; }
-        echo "polaris-init: granting CATALOG_MANAGE_CONTENT to catalog_admin..."
-        # Polaris answers 201 (created) or 200 (updated) for this PUT
-        curl -s -o /tmp/resp2.json -w "%{http_code}" -X PUT "$$POLARIS/api/management/v1/catalogs/polaris/catalog-roles/catalog_admin/grants" \
-          -H "Authorization: Bearer $$TOKEN" -H "Content-Type: application/json" -H "Polaris-Realm: POLARIS" \
-          -d '{"type":"catalog","privilege":"CATALOG_MANAGE_CONTENT"}' \
-          | { code=$$(cat); if [ "$$code" != 200 ] && [ "$$code" != 201 ] && [ "$$code" != 409 ]; then echo "polaris-init: grant failed ($$code):" && cat /tmp/resp2.json && exit 1; fi; }
-        echo "polaris-init: done."
+    entrypoint: ["/bin/sh", "/scripts/polaris-init.sh"]
+    volumes:
+      - ./polaris:/scripts:ro
     mem_limit: 64m
     cpus: "0.1"
     networks:
