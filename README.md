@@ -4,15 +4,15 @@ A minimal "Google Maps" clone for Tehran: live street-level traffic colors on a 
 
 ## Data Engineering Stack
 
-| Component              | Role                                                                                                                                                                                |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Postgres + PostGIS** | Street geometry + **latest status** of each street: current duration, current baseline duration, current color on the map.                                                          |
-| **Redpanda**           | Real-time data broker (`gps-raw` and `gps-processed` topics).                                                                                                                       |
-| **Spark + Sedona**     | Streaming job: flags inaccurate/invalid GPS pings, spatial-joins each valid ping to a street, publishes enriched events back to Redpanda.                                           |
-| **ClickHouse**         | Recent speed history per street (shown on click). Kafka engine table + materialized view land each enriched ping; TTL keeps only 6 hours of data. Receives live data from Redpanda. |
-| **MinIO (lakehouse)**  | Raw immutable events: every `gps-processed` ping landed in the Iceberg table `polaris.telemetry.gps_processed` (partitioned `date`/`hour`), managed by the Polaris REST catalog, data files on MinIO. Input for the next-day traffic prediction job (runs every 1 minute).                                      |
-| **Airflow**            | Orchestrates the hourly OSM refresh (download latest Iran extract → extract Tehran → load PostGIS) and the prediction jobs (every 1 minute).                                         |
-| **Python**             | Generates the live GPS stream (coordinates + speed of users); runs as the compose service `generator` (TZ=Asia/Tehran so payload timestamps are Tehran-local).                                                                                                                       |
+| Component              | Role                                                                                                                                                                                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Postgres + PostGIS** | Street geometry + **latest status** of each street: current duration, current baseline duration, current color on the map.                                                                                                                     |
+| **Redpanda**           | Real-time data broker (`gps-raw` and `gps-processed` topics).                                                                                                                                                                                  |
+| **Spark + Sedona**     | Streaming job: flags inaccurate/invalid GPS pings, spatial-joins each valid ping to a street, publishes enriched events back to Redpanda.                                                                                                      |
+| **ClickHouse**         | Recent speed history per street (shown on click). Kafka engine table + materialized view land each enriched ping; TTL keeps only 6 hours of data. Receives live data from Redpanda.                                                            |
+| **MinIO (lakehouse)**  | Raw immutable events: every `gps-processed` ping landed in the Iceberg table `polaris.telemetry.gps_processed` (partitioned `date`/`hour`), managed by the Polaris REST catalog, data files on MinIO. Input for rolling street-speed averages. |
+| **Airflow**            | Airflow 3 service with LocalExecutor at `http://localhost:8081`; its `street_speed_prediction` DAG refreshes each street's five-minute average speed every two minutes.                                                                        |
+| **Python**             | Generates the live GPS stream (coordinates + speed of users); runs as the compose service `generator` (TZ=Asia/Tehran so payload timestamps are Tehran-local).                                                                                 |
 
 ### Data flow
 
@@ -24,16 +24,16 @@ flowchart TD
     ENR --> PG[("Postgres + PostGIS<br/>latest street status:<br/>current + baseline duration, color")]
     ENR --> CH["ClickHouse<br/>raw pings per street + TTL 6h<br/>speed trend per street"]
     ENR --> S3[("MinIO + Iceberg/Polaris<br/>lakehouse: gps_processed")]
-    S3 --> PRED["Prediction job (every 1 min)<br/>next-day traffic per street"]
+    S3 --> PRED["Prediction job (every 2 min)<br/>5-minute average speed per street"]
     PRED --> PG
     AF["Airflow"] -.->|"orchestrates"| PRED
     AF -.->|"hourly OSM refresh"| OSM["Download OSM +<br/>extract Tehran + load PostGIS"]
     OSM --> PG
 ```
 
-> The prediction job runs **every 1 minute** instead of nightly: this cluster
-> exists only for a course final project, and a short cadence keeps the whole
-> lakehouse → prediction → Postgres loop visible during a demo.
+> The prediction DAG recalculates the average speed from valid pings in the
+> preceding five minutes every two minutes, keeping the lakehouse → prediction
+> → Postgres loop visible during a demo.
 
 ## UI Stack
 
@@ -73,11 +73,12 @@ osmium extract \
 Run the following code to inject Tehran's raw data into Postgres + PostGIS (via `osm2pgsql` ) and create columns and indexes for live traffic). 
 
 ```bash
-docker compose up -d postgres-1; 
-docker compose --profile import run --rm import-map-to-postgres; 
-docker compose --profile import run --rm --no-deps create-postgres-columns; 
-docker compose up -d;
-
+docker compose up -d postgres-1
+docker compose --profile import run --rm import-map-to-postgres
+docker compose --profile import run --rm --no-deps create-postgres-columns
+docker compose up -d
+docker compose wait minio-init polaris-init airflow-db-init
+docker compose rm -f minio-init polaris-init airflow-db-init
 ```
 
 ```mermaid
