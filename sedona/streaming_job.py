@@ -46,14 +46,71 @@ roads = (
 
 # %% update database
 
+FREE_FLOW_SPEED_KMH = 60.0  # fallback baseline when no prediction exists yet
+
+
+def fetch_predicted_speeds(street_ids):
+    """osm_id -> predicted_speed_kmh for the streets the Airflow prediction
+    DAG (street_speed_prediction) has written to roads.predicted_speed_kmh."""
+
+    id_list = ", ".join(str(street_id) for street_id in street_ids)
+    sql = (
+        "SELECT osm_id, predicted_speed_kmh FROM roads "
+        f"WHERE osm_id IN ({id_list}) AND predicted_speed_kmh IS NOT NULL"
+    )
+
+    jvm = spark.sparkContext._jvm
+    conn = jvm.java.sql.DriverManager.getConnection(
+        JDBC_URL, JDBC_PROPS["user"], JDBC_PROPS["password"])
+    try:
+        stmt = conn.createStatement()
+        try:
+            rs = stmt.executeQuery(sql)
+            predicted = {}
+            while rs.next():
+                predicted[rs.getLong("osm_id")] = float(
+                    rs.getFloat("predicted_speed_kmh"))
+        finally:
+            stmt.close()
+    finally:
+        conn.close()
+    return predicted
+
+
+def traffic_level_for(speed_kmh, predicted_kmh):
+    """Traffic level from the measured speed relative to the street's
+    predicted (normal) speed; streets without a prediction yet fall back to
+    the fixed free-flow baseline."""
+
+    baseline = (
+        predicted_kmh
+        if predicted_kmh is not None and predicted_kmh > 0
+        else FREE_FLOW_SPEED_KMH
+    )
+    ratio = speed_kmh / baseline
+    if ratio >= 0.8:
+        return 0    # free flow
+    if ratio >= 0.6:
+        return 1    # slow
+    if ratio >= 0.4:
+        return 2    # heavy
+    return 3        # jammed
+
+
 def update_roads_traffic(stats_df):
 
     rows = [
-        row for row in stats_df.collect()
+        row.asDict() for row in stats_df.collect()
         if row["speed_kmh"] is not None and row["traffic_updated_at"] is not None
     ]
     if not rows:
         return
+
+    # traffic_level = current speed vs the street's predicted speed
+    predicted = fetch_predicted_speeds({int(row["street_id"]) for row in rows})
+    for row in rows:
+        row["traffic_level"] = traffic_level_for(
+            row["speed_kmh"], predicted.get(int(row["street_id"])))
 
     def sql_literal(row):
         ts = str(row["traffic_updated_at"]).replace("'", "''")
@@ -177,8 +234,10 @@ def enrich_batch(batch_df, batch_df_id):
             .save()
         )
 
-        # groupBy street_id
-        ratio = F.col("speed_kmh") / 60   # free flow speed = 60 km/h
+        # groupBy street_id — traffic_level is derived in update_roads_traffic
+        # by comparing the measured speed against the street's predicted speed
+        # (roads.predicted_speed_kmh, written by the Airflow DAG
+        # street_speed_prediction).
         street_stats = (
             enriched
             .filter(F.col("is_valid") & F.col("street_id").isNotNull())
@@ -186,13 +245,6 @@ def enrich_batch(batch_df, batch_df_id):
             .agg(
                 F.avg("speed_kmh").alias("speed_kmh"),
                 F.max("timestamp").alias("traffic_updated_at"),
-            )
-            .withColumn(
-                "traffic_level",
-                F.when(ratio >= 0.8, F.lit(0))   # free flow
-                .when(ratio >= 0.6, F.lit(1))    # slow
-                .when(ratio >= 0.4, F.lit(2))    # heavy
-                .otherwise(F.lit(3)),            # jammed
             )
         )
         update_roads_traffic(street_stats)
