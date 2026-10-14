@@ -14,13 +14,13 @@ from pyiceberg.expressions import (
     LessThanOrEqual,
 )
 
-
 @dag(
     dag_id="street_speed_prediction",
     schedule="*/2 * * * *",
     start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Tehran"),
     catchup=False,
     max_active_runs=1,
+    is_paused_upon_creation=False,
     tags=["traffic", "prediction"],
 )
 def street_speed_prediction():
@@ -44,12 +44,6 @@ def street_speed_prediction():
                 "s3.access-key-id": os.environ["MINIO_ACCESS_KEY"],
                 "s3.secret-access-key": os.environ["MINIO_SECRET_KEY"],
                 "s3.path-style-access": "true",
-                # pyiceberg sends X-Iceberg-Access-Delegation: vended-credentials
-                # by default; Polaris can't vend STS creds for MinIO
-                # (stsUnavailable) and answers 400 "Credential vending was
-                # requested ... no credentials are available". Ask for no
-                # delegation and read with the static MinIO keys above,
-                # like the Spark lakehouse job does.
                 "header.X-Iceberg-Access-Delegation": "none",
             },
         )

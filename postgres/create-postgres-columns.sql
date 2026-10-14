@@ -4,6 +4,10 @@ ALTER TABLE roads
     ADD COLUMN IF NOT EXISTS traffic_updated_at timestamp,
     ADD COLUMN IF NOT EXISTS predicted_speed_kmh real;
 
+# initialize the baseline speed 
+UPDATE roads 
+    SET predicted_speed_kmh = 30;
+
 CREATE UNIQUE INDEX IF NOT EXISTS roads_osm_id_idx
     ON roads (osm_id);
 

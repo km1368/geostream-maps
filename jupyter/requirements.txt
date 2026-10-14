@@ -1,0 +1,2 @@
+ipykernel
+pyspark[connect]==4.0.1

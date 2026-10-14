@@ -204,28 +204,28 @@ services:
     networks:
       - mapnet
 
-  sedona-jupyter:
-    image: docker.arvancloud.ir/apache/sedona:1.9.1
-    restart: unless-stopped
-    profiles:
-      - sedona-jupyter
-    environment:
-      DRIVER_MEM: 2g
-      EXECUTOR_MEM: 2g
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "8888:8888" # JupyterLab
-      - "8086:8080" # Spark master UI (8080 is taken by web)
-      - "8087:8081" # Spark worker UI
-    volumes:
-      - ./sedona/notebooks:/opt/workspace:rw
-      - sedona-ivy:/root/.ivy2
-    mem_limit: 3g
-    cpus: "2"
-    networks:
-      - mapnet
+  # sedona-jupyter:
+  #   image: docker.arvancloud.ir/apache/sedona:1.9.1
+  #   restart: unless-stopped
+  #   profiles:
+  #     - sedona-jupyter
+  #   environment:
+  #     DRIVER_MEM: 2g
+  #     EXECUTOR_MEM: 2g
+  #     POSTGRES_DB: ${POSTGRES_DB}
+  #     POSTGRES_USER: ${POSTGRES_USER}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  #   ports:
+  #     - "8888:8888" # JupyterLab
+  #     - "8086:8080" # Spark master UI (8080 is taken by web)
+  #     - "8087:8081" # Spark worker UI
+  #   volumes:
+  #     - ./sedona/notebooks:/opt/workspace:rw
+  #     - sedona-ivy:/root/.ivy2
+  #   mem_limit: 3g
+  #   cpus: "2"
+  #   networks:
+  #     - mapnet
 
   minio-init:
     image: docker.arvancloud.ir/minio/mc:RELEASE.2025-08-13T08-35-41Z
@@ -285,12 +285,17 @@ services:
       LAKEHOUSE_TRIGGER: "60 seconds"
       POLARIS_URI: http://polaris-1:8181/api/catalog
       POLARIS_CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID}:${POLARIS_ROOT_CLIENT_SECRET}
+    ports:
+      # Spark Connect server (start-jobs.sh) — attach a remote SparkSession
+      # from the host: SparkSession.builder.remote("sc://localhost:15002")
+      - "15002:15002"
     volumes:
       - ./sedona/streaming_job.py:/opt/workspace/streaming_job.py:ro
       - ./sedona/lakehouse_job.py:/opt/workspace/lakehouse_job.py:ro
       - ./sedona/start-jobs.sh:/opt/workspace/start-jobs.sh:ro
       - sedona-checkpoints:/opt/workspace/.checkpoints
-    mem_limit: 4g
+    # 3 JVMs (2 streaming jobs + Connect server) at 1g heap each + overhead
+    mem_limit: 5g
     cpus: "2"
     networks:
       - mapnet
