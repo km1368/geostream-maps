@@ -1,26 +1,3 @@
-# OSM data files (large, do not commit)
-data/*.osm.pbf
-data/*.osm.bz2
-data/*.osm
-data/*.pbf
-
-# Extracted / intermediate data
-data/*.geojson
-data/*.shp
-data/*.shx
-data/*.dbf
-data/*.prj
-
-# Docker volumes / runtime data
-data/pg/
-data/postgres/
-
-# text 
-*.txt 
-
-sedona/jars
-
-# system folders 
+/data/
 /.github/
 /.venv/
-
