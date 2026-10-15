@@ -12,6 +12,7 @@ A minimal "Google Maps" clone for Tehran: live street-level traffic colors on a 
 | **ClickHouse**         | Recent speed history per street (shown on click). Kafka engine table + materialized view land each enriched ping; TTL keeps only 6 hours of data. Receives live data from Redpanda.                                                            |
 | **MinIO (lakehouse)**  | Raw immutable events: every `gps-processed` ping landed in the Iceberg table `polaris.telemetry.gps_processed` (partitioned `date`/`hour`), managed by the Polaris REST catalog, data files on MinIO. Input for rolling street-speed averages. |
 | **Airflow**            | Airflow 3 service with LocalExecutor at `http://localhost:8081`; its `street_speed_prediction` DAG refreshes each street's five-minute average speed every two minutes.                                                                        |
+| **Apache Superset**    | Optional analytics UI at `http://localhost:8088`, with persistent metadata in Postgres and a preconfigured ClickHouse connection.                                                                                                              |
 | **Python**             | Generates the live GPS stream (coordinates + speed of users); runs as the compose service `generator` (TZ=Asia/Tehran so payload timestamps are Tehran-local).                                                                                 |
 
 ### Data flow
@@ -40,6 +41,20 @@ flowchart TD
 - **Nginx** — serves the static page and proxies tile/history requests.
 - **HTML/CSS + MapLibre GL JS** — renders the map and live traffic colors.
 - **Martin** — tile server generating vector tiles straight from PostGIS.
+
+### Apache Superset
+
+Set `SUPERSET_SECRET_KEY` and `SUPERSET_ADMIN_PASSWORD` in the project root
+`.env` file, then start Superset with:
+
+```bash
+docker compose up -d superset
+```
+
+Open `http://localhost:8088` and sign in using the configured admin username
+and password. The `ClickHouse` database is registered automatically and uses
+the existing ClickHouse credentials from the root `.env`, connecting to
+`clickhouse-1:8123` over HTTP.
 
 ### Serving process
 
@@ -77,57 +92,12 @@ docker compose up -d postgres-1
 docker compose --profile import run --rm import-map-to-postgres
 docker compose --profile import run --rm --no-deps create-postgres-columns
 docker compose up -d
-docker compose wait minio-init polaris-init airflow-db-init
-docker compose rm -f minio-init polaris-init airflow-db-init
+docker compose wait minio-init polaris-init airflow-db-init superset-db-init
+docker compose rm -f minio-init polaris-init airflow-db-init superset-db-init
 ```
 
 ```mermaid
 flowchart TD
     A["Download iran-latest.osm.pbf<br/>from the internet"] --> B["Extract Tehran<br/>keep dataset small"]
     B --> C["Inject into Postgres + PostGIS<br/>osm2pgsql + post-import SQL"]
-```
-
-## Lakehouse (MinIO + Iceberg + Polaris)
-
-A second Spark streaming job (`sedona/lakehouse_job.py`, launched alongside the
-main pipeline by `sedona/start-jobs.sh` inside the `sedona-stream` container)
-consumes `gps-processed` with its own consumer group (`spark-lakehouse`) and
-writes every event — invalid pings and streetless pings included — into the
-Iceberg table `polaris.telemetry.gps_processed`, partitioned by `date` and
-`hour`. The table is managed by **Apache Polaris** (REST catalog); its Parquet
-data files land in the MinIO `lakehouse` bucket under
-`gps_processed/data/date=…/hour=…/`.
-
-- Two idempotent one-shot services run on every `docker compose up -d`:
-  `minio-init` creates the `lakehouse` bucket, `polaris-init` bootstraps the
-  Polaris catalog (mints a token with the pinned root credentials from
-  `.env`, creates the catalog with an S3 storage config pointing at MinIO,
-  grants `CATALOG_MANAGE_CONTENT`). `sedona-stream` waits for both.
-- Spark talks to Polaris through the Iceberg REST catalog and to MinIO through
-  S3FileIO (`s3.endpoint http://minio-1:9000`, path-style, region
-  `us-east-1`). All jars (Iceberg Spark runtime + AWS bundle, Kafka
-  connector, Postgres JDBC, hadoop-aws + AWS SDK bundle) are downloaded at
-  **build time** by `sedona/Dockerfile` — never `--packages` (runtime Maven
-  downloads hang on this network). If the build host cannot reach Maven
-  Central, pass a mirror:
-
-```bash
-docker compose build --build-arg MAVEN_BASE=https://<maven-mirror>/maven2 sedona-stream
-```
-
-- Inspect the landing data (creds in `.env`; or use the MinIO console at
-  localhost:19001):
-
-```bash
-docker run --rm --network mahyaar-maps-mapnet minio/mc sh -c \
-  'mc alias set x http://minio-1:9000 <MINIO_ROOT_USER> <MINIO_ROOT_PASSWORD> >/dev/null && \
-   mc tree --files x/lakehouse/gps_processed | tail'
-```
-
-- Query the table from the `sedona-jupyter` playground (the session needs the
-  same Iceberg jars + `spark.sql.catalog.polaris.*` config as
-  `lakehouse_job.py`):
-
-```python
-spark.sql("SELECT * FROM polaris.telemetry.gps_processed ORDER BY timestamp DESC").show()
 ```
