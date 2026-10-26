@@ -1,0 +1,26 @@
+cache_timeout: null
+certification_details: null
+certified_by: null
+dataset_uuid: 89184383-90e7-4489-992d-cd9402eea83d
+description: Number of valid street-linked pings received over time.
+params:
+  adhoc_filters: []
+  annotation_layers: []
+  color_scheme: supersetColors
+  dashboards: []
+  extra_form_data: {}
+  groupby: []
+  metrics:
+    - ping_count
+  order_desc: false
+  row_limit: 10000
+  show_legend: false
+  time_grain_sqla: PT5M
+  viz_type: echarts_timeseries_bar
+  x_axis: timestamp
+  x_axis_sort_asc: true
+query_context: null
+slice_name: Ping volume over time
+uuid: 74a379dc-c6fd-47f9-b81b-11d0d9d7b15e
+version: 1.0.0
+viz_type: echarts_timeseries_bar

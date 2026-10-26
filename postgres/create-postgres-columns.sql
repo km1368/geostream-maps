@@ -2,9 +2,10 @@ ALTER TABLE roads
     ADD COLUMN IF NOT EXISTS traffic_level smallint,
     ADD COLUMN IF NOT EXISTS speed_kmh real,
     ADD COLUMN IF NOT EXISTS traffic_updated_at timestamp,
-    ADD COLUMN IF NOT EXISTS predicted_speed_kmh real;
+    ADD COLUMN IF NOT EXISTS predicted_speed_kmh real,
+    ADD COLUMN IF NOT EXISTS prediction_updated_at timestamp;
 
-# initialize the baseline speed 
+-- initialize the baseline speed 
 UPDATE roads 
     SET predicted_speed_kmh = 30;
 

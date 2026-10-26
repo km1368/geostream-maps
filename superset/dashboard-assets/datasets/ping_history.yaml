@@ -1,0 +1,62 @@
+always_filter_main_dttm: false
+cache_timeout: null
+columns:
+  - column_name: street_id
+    description: null
+    expression: null
+    extra: null
+    filterable: true
+    groupby: true
+    is_active: true
+    is_dttm: false
+    python_date_format: null
+    type: BIGINT
+    verbose_name: null
+  - column_name: timestamp
+    description: null
+    expression: null
+    extra: null
+    filterable: true
+    groupby: true
+    is_active: true
+    is_dttm: true
+    python_date_format: null
+    type: TIMESTAMP
+    verbose_name: null
+  - column_name: speed_kmh
+    description: null
+    expression: null
+    extra: null
+    filterable: true
+    groupby: true
+    is_active: true
+    is_dttm: false
+    python_date_format: null
+    type: DECIMAL
+    verbose_name: Speed (km/h)
+description: Recent valid GPS pings retained by ClickHouse for six hours.
+database_uuid: CLICKHOUSE_DATABASE_UUID
+metrics:
+  - currency: null
+    d3format: ',.1f'
+    description: null
+    expression: AVG(speed_kmh)
+    extra: null
+    metric_name: avg_speed_kmh
+    metric_type: null
+    verbose_name: Average speed (km/h)
+    warning_text: null
+  - currency: null
+    d3format: ',d'
+    description: null
+    expression: COUNT(*)
+    extra: null
+    metric_name: ping_count
+    metric_type: count
+    verbose_name: Ping volume
+    warning_text: null
+schema: default
+sql: SELECT street_id, timestamp, speed_kmh FROM default.tbl_gps_processed_aggregated WHERE timestamp >= now() - INTERVAL 6 HOUR
+table_name: recent_ping_history
+uuid: 89184383-90e7-4489-992d-cd9402eea83d
+version: 1.0.0

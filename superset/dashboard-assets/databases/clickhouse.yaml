@@ -1,0 +1,4 @@
+database_name: ClickHouse
+sqlalchemy_uri: clickhousedb://registered-by-bootstrap
+uuid: CLICKHOUSE_DATABASE_UUID
+version: 1.0.0

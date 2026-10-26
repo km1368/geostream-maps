@@ -1,0 +1,57 @@
+dashboard_title: Tehran Traffic Operations
+description: Recent telemetry from ClickHouse.
+metadata: {}
+position:
+  DASHBOARD_VERSION_KEY: v2
+  ROOT_ID:
+    id: ROOT_ID
+    type: ROOT
+    children:
+      - GRID_ID
+  GRID_ID:
+    id: GRID_ID
+    type: GRID
+    children:
+      - ROW-1
+  ROW-1:
+    id: ROW-1
+    type: ROW
+    children:
+      - COLUMN-average-speed
+      - COLUMN-ping-volume
+  COLUMN-average-speed:
+    id: COLUMN-average-speed
+    type: COLUMN
+    children:
+      - CHART-average-speed
+    meta:
+      width: 6
+  COLUMN-ping-volume:
+    id: COLUMN-ping-volume
+    type: COLUMN
+    children:
+      - CHART-ping-volume
+    meta:
+      width: 6
+  CHART-average-speed:
+    id: CHART-average-speed
+    type: CHART
+    children: []
+    meta:
+      chartId: 1
+      height: 50
+      uuid: c5871864-06a5-4a0b-9140-9e7433b90c14
+      width: 6
+  CHART-ping-volume:
+    id: CHART-ping-volume
+    type: CHART
+    children: []
+    meta:
+      chartId: 2
+      height: 50
+      uuid: 74a379dc-c6fd-47f9-b81b-11d0d9d7b15e
+      width: 6
+published: true
+slug: tehran-traffic-operations
+uuid: 45509d8d-b133-48e2-8b2a-bf83674666df
+version: 1.0.0

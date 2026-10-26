@@ -1,9 +1,14 @@
 FROM docker.arvancloud.ir/apache/superset:6.1.0
 
 USER root
-RUN pip --python /app/.venv/bin/python install --no-cache-dir -i https://mirror-pypi.runflare.com/simple \
-    clickhouse-connect==0.9.2 psycopg2-binary==2.9.10
+ENV TZ=Asia/Tehran
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+RUN . /app/.venv/bin/activate && \
+    uv pip install --no-cache-dir --index-url https://mirror-pypi.runflare.com/simple \
+    clickhouse-connect 
 COPY superset_config.py /app/superset_config.py
 COPY superset_init.py /app/superset_init.py
-ENV SUPERSET_CONFIG_PATH=/app/superset_config.py
+COPY dashboard-assets /app/dashboard-assets
 USER superset
+EXPOSE 8088
+CMD ["/app/docker/entrypoints/run-server.sh"]
