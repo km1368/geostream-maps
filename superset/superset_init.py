@@ -1,5 +1,11 @@
 import os
+import subprocess
+import tempfile
+import zipfile
+from pathlib import Path
 from urllib.parse import quote_plus
+
+import yaml
 
 from superset import db
 from superset.app import create_app
@@ -8,6 +14,7 @@ from superset.app import create_app
 app = create_app()
 
 with app.app_context():
+
     from superset.models.core import Database
 
     security_manager = app.appbuilder.sm
@@ -49,3 +56,45 @@ with app.app_context():
         database.set_sqlalchemy_uri(clickhouse_uri)
 
     db.session.commit()
+    print("Registered ClickHouse", flush=True)
+
+    old_postgres_database = (
+        db.session.query(Database)
+        .filter_by(database_name="Traffic Postgres")
+        .one_or_none()
+    )
+    if old_postgres_database is not None:
+        db.session.delete(old_postgres_database)
+        db.session.commit()
+        print("Removed Traffic Postgres data source", flush=True)
+
+    database_uuids = {
+        "CLICKHOUSE_DATABASE_UUID": str(database.uuid),
+    }
+    assets_dir = Path("/app/dashboard-assets")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        bundle_path = Path(temp_dir) / "traffic-operations.zip"
+        with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for asset_path in sorted(assets_dir.rglob("*.yaml")):
+                asset = yaml.safe_load(asset_path.read_text(encoding="utf-8"))
+                if asset.get("uuid") in database_uuids:
+                    asset["uuid"] = database_uuids[asset["uuid"]]
+                if asset.get("database_uuid") in database_uuids:
+                    asset["database_uuid"] = database_uuids[asset["database_uuid"]]
+                bundle.writestr(
+                    "traffic-operations/"
+                    + asset_path.relative_to(assets_dir).as_posix(),
+                    yaml.safe_dump(asset, sort_keys=False),
+                )
+        subprocess.run(
+            [
+                "superset",
+                "import-dashboards",
+                "--path",
+                str(bundle_path),
+                "--username",
+                username,
+            ],
+            check=True,
+        )
+    print("Imported dashboard: Tehran Traffic Operations", flush=True)

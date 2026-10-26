@@ -1,0 +1,37 @@
+cache_timeout: null
+certification_details: null
+certified_by: null
+dataset_uuid: 89184383-90e7-4489-992d-cd9402eea83d
+description: Average speed from valid pings in the recent six-hour window.
+params:
+  adhoc_filters: []
+  annotation_layers: []
+  color_scheme: supersetColors
+  comparison_type: values
+  dashboards: []
+  extra_form_data: {}
+  forecastInterval: 0.8
+  forecastPeriods: 10
+  groupby: []
+  legendOrientation: top
+  legendType: scroll
+  markerSize: 4
+  metrics:
+    - avg_speed_kmh
+  order_desc: false
+  rich_tooltip: true
+  row_limit: 10000
+  seriesType: line
+  show_legend: false
+  time_grain_sqla: PT5M
+  tooltipTimeFormat: smart_date
+  viz_type: echarts_timeseries_line
+  x_axis: timestamp
+  x_axis_sort_asc: true
+  x_axis_time_format: smart_date
+  y_axis_format: ',.1f'
+query_context: null
+slice_name: Recent average speed
+uuid: c5871864-06a5-4a0b-9140-9e7433b90c14
+version: 1.0.0
+viz_type: echarts_timeseries_line
