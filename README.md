@@ -1,11 +1,12 @@
-## GeoStream Maps — Final project of the Data Engineering course at Sepahram
+![GeoStream Maps logo](assets/logo.png)
+## GeoStream Maps — A real-time data-driven platform for traffic monitoring
 
-A minimal "Google Maps" clone for Tehran: live street-level traffic colors on a vector map, with a recent speed trend per street on click. Built as the final project of the data engineering course. 
+A simulator of map and real-time traffic services (similar to Google Maps) displaying live street traffic conditions on a map. Built as the final project of the data engineering course in Sepahram School of Data Engineering. 
 
 ### Data Engineering Stack
 
-| Component              | Role                                                                                                                                                                                                                                           |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Component   | Role  |
+| ----------- | ------ |
 | **Postgres + PostGIS** | Operational database. Stores geometry, current speed, current predicted speed, current color on the map for each street. |
 | **Redpanda** | Real-time data broker. |
 | **Spark + Sedona** | Stream processing: map GPS pings to streets, flag inaccurate ones, and publishes enriched events back to Redpanda. |
