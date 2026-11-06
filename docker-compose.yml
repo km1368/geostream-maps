@@ -1,4 +1,4 @@
-name: mahyaar-maps
+name: geostream-maps
 
 services:
   postgres-1:
@@ -47,7 +47,7 @@ services:
 
   airflow:
     build: ./airflow
-    image: mahyaar-maps-airflow
+    image: geostream-maps-airflow:3.3.1-python3.12
     restart: unless-stopped
     depends_on:
       airflow-db-init:
@@ -102,6 +102,21 @@ services:
       - "9092:9092"
     mem_limit: 1.5g
     cpus: "1"
+    networks:
+      - mapnet
+
+  redpanda-init:
+    image: docker.arvancloud.ir/redpandadata/redpanda:v26.2.2
+    depends_on:
+      redpanda-1:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        rpk -X brokers=redpanda-1:29092 cluster health --exit-when-healthy
+        rpk -X brokers=redpanda-1:29092 topic create --if-not-exists --partitions 1 --replicas 1 gps-raw gps-processed
+    mem_limit: 64m
+    cpus: "0.1"
     networks:
       - mapnet
 
@@ -161,7 +176,6 @@ services:
     entrypoint: ["/bin/sh", "/scripts/import-map-to-postgres-tables.sh"]
     volumes:
       - ./postgres/raw-map-data:/data:ro
-      # - ./postgres/config:/config:ro
       - ./postgres:/scripts:ro
     mem_limit: 1g
     cpus: "2"
@@ -200,7 +214,6 @@ services:
 
   martin:
     image: ghcr-mirror.liara.ir/maplibre/martin:1.16.1
-    # image: ghcr.io/maplibre/martin:1.16.1
     restart: unless-stopped
     depends_on:
       postgres-1:
@@ -222,29 +235,6 @@ services:
     networks:
       - mapnet
 
-  # sedona-jupyter:
-  #   image: docker.arvancloud.ir/apache/sedona:1.9.1
-  #   restart: unless-stopped
-  #   profiles:
-  #     - sedona-jupyter
-  #   environment:
-  #     DRIVER_MEM: 2g
-  #     EXECUTOR_MEM: 2g
-  #     POSTGRES_DB: ${POSTGRES_DB}
-  #     POSTGRES_USER: ${POSTGRES_USER}
-  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-  #   ports:
-  #     - "8888:8888" # JupyterLab
-  #     - "8086:8080" # Spark master UI (8080 is taken by web)
-  #     - "8087:8081" # Spark worker UI
-  #   volumes:
-  #     - ./sedona/notebooks:/opt/workspace:rw
-  #     - sedona-ivy:/root/.ivy2
-  #   mem_limit: 3g
-  #   cpus: "2"
-  #   networks:
-  #     - mapnet
-
   minio-init:
     image: docker.arvancloud.ir/minio/mc:RELEASE.2025-08-13T08-35-41Z
     depends_on:
@@ -255,7 +245,6 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      # retry until MinIO is accepting connections, then create the bucket
       - |
         i=0; until mc alias set lakehouse-init http://minio-1:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
           i=$$((i+1));
@@ -268,13 +257,15 @@ services:
     networks:
       - mapnet
 
-  sedona-stream:
+  sedona-1:
     build: ./sedona
-    image: mahyaar-maps-sedona-stream
+    image: geostream-maps-sedona:1.9.1
     restart: unless-stopped
     depends_on:
       redpanda-1:
         condition: service_started
+      redpanda-init:
+        condition: service_completed_successfully
       postgres-1:
         condition: service_started
       minio-init:
@@ -304,15 +295,12 @@ services:
       POLARIS_URI: http://polaris-1:8181/api/catalog
       POLARIS_CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID}:${POLARIS_ROOT_CLIENT_SECRET}
     ports:
-      # Spark Connect server (start-jobs.sh) — attach a remote SparkSession
-      # from the host: SparkSession.builder.remote("sc://localhost:15002")
       - "15002:15002"
     volumes:
       - ./sedona/streaming_job.py:/opt/workspace/streaming_job.py:ro
       - ./sedona/lakehouse_job.py:/opt/workspace/lakehouse_job.py:ro
       - ./sedona/start-jobs.sh:/opt/workspace/start-jobs.sh:ro
       - sedona-checkpoints:/opt/workspace/.checkpoints
-    # 3 JVMs (2 streaming jobs + Connect server) at 1g heap each + overhead
     mem_limit: 5g
     cpus: "2"
     networks:
@@ -328,8 +316,6 @@ services:
     volumes:
       - ./web/index.html:/usr/share/nginx/html/index.html:ro
       - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # Vazirmatn TTF served at /fonts/ for the HTML UI (legend, popups);
-      # the same directory feeds Martin's map-label glyphs.
       - ./web/fonts:/fonts:ro
     mem_limit: 64m
     cpus: "0.1"
@@ -340,8 +326,6 @@ services:
     image: docker.arvancloud.ir/clickhouse/clickhouse-server:26.3
     container_name: clickhouse-1
     environment:
-      # Without these the image restricts 'default' to container-localhost only,
-      # so host connections fail with "Authentication failed" (code 194).
       CLICKHOUSE_USER: ${CLICKHOUSE_USER}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
     ulimits:
@@ -353,9 +337,6 @@ services:
       - "9000:9000" # native interface (clickhouse-client)
     volumes:
       - clickhouse-data:/var/lib/clickhouse
-      # caps memory/threads so CH stays inside its container limit
-      # - ./clickhouse/config.d/limits.xml:/etc/clickhouse-server/config.d/limits.xml:ro
-      # runs at startup: creates Kafka engine table + MV to consume from Redpanda
       - ./clickhouse/initdb/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1'"]
@@ -368,9 +349,8 @@ services:
       - mapnet
 
   superset:
-    build:
-      context: ./superset
-    image: mahyaar-maps-superset:6.1.0
+    build: ./superset
+    image: geostream-maps-superset:6.1.0
     restart: unless-stopped
     depends_on:
       clickhouse-1:
@@ -387,9 +367,7 @@ services:
       SQLALCHEMY_DATABASE_URI: sqlite:////app/superset/superset.db
     volumes:
       - ./superset/superset-init.sh:/superset-init.sh:ro
-      # - superset_home:/app/superset
-      # - ./data:/data
-      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro  # Mount the config file
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro  
     command:
       - /bin/sh
       - /superset-init.sh
@@ -402,10 +380,11 @@ services:
 
   generator:
     build: ./generator
-    image: mahyaar-maps-generator
+    image: geostream-maps-generator:1.0
     restart: unless-stopped
     depends_on:
-      - redpanda-1
+      redpanda-init:
+        condition: service_completed_successfully
     environment:
       KAFKA_BOOTSTRAP: redpanda-1:29092
       TZ: Asia/Tehran
@@ -436,18 +415,13 @@ services:
 
   polaris-1:
     image: docker.arvancloud.ir/apache/polaris:1.8.0
-    # image: ghcr.io/apache/polaris:1.8.0
     container_name: polaris-1
     ports:
       - "8181:8181" # Polaris REST API
     environment:
-      - JAVA_TOOL_OPTIONS=-Dpolaris.bootstrap.root=true   # Optional: Helps make startup logs clearer
-      # Pin the root principal credentials — without this, Polaris generates a
-      # RANDOM pair at every bootstrap (in-memory persistence) and prints it to
-      # stdout. Format: <realm>,<clientId>,<clientSecret>
+      - JAVA_TOOL_OPTIONS=-Dpolaris.bootstrap.root=true   
       - POLARIS_BOOTSTRAP_CREDENTIALS=POLARIS,${POLARIS_ROOT_CLIENT_ID},${POLARIS_ROOT_CLIENT_SECRET}
       - polaris.realm-context.realms=POLARIS
-      # Polaris itself needs MinIO creds to validate/purge table locations
       - AWS_REGION=us-east-1
       - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER}
       - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD}

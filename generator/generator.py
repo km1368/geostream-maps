@@ -28,7 +28,7 @@ load_dotenv(os.path.join(os.path.dirname(
 
 
 producer = KafkaProducer(
-    bootstrap_servers='localhost:9092',
+    bootstrap_servers=os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092"),
     value_serializer=lambda v: json.dumps(v).encode('utf-8'),
     acks='all'
 )

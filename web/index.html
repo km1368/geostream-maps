@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8">
-    <title>Tehran Traffic Map</title>
+    <title>GeoStream Maps</title>
 
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
@@ -17,9 +17,6 @@
         @font-face {
             font-family: "Vazirmatn";
             src: url("/fonts/Vazirmatn.ttf") format("truetype");
-            /* Vazirmatn.ttf is a variable font: declare the full weight range
-            so bold text (e.g. the popup title) uses real weights instead of
-            the browser synthesizing them. */
             font-weight: 100 900;
             font-style: normal;
             font-display: swap;
@@ -104,11 +101,7 @@
     <div id="map"></div>
 
     <script>
-        // Required for correct Persian/Arabic rendering: without this plugin,
-        // RTL text is drawn disconnected and left-to-right. It must be set
-        // before the map is created. The plugin is served from the same origin
-        // (nginx proxies /tiles/ to Martin, which has no plugin endpoint, so we
-        // use the official CDN copy).
+        // Required for correct Persian/Arabic rendering
         maplibregl.setRTLTextPlugin(
             "https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.3.0/dist/mapbox-gl-rtl-text.js",
             (error) => {
@@ -133,11 +126,6 @@
             style: {
                 version: 8,
 
-                // MapLibre needs glyph PBFs to draw any text. Martin generates them
-                // on the fly from the font files mounted into the martin container
-                // (see docker-compose.yml). The fontstack name must match the font
-                // name inside the file — check http://localhost:8080/tiles/catalog
-                // under "fonts" for the exact name to use here.
                 glyphs: `${location.origin}/tiles/font/{fontstack}/{range}`,
 
                 sources: {
@@ -321,18 +309,12 @@
                             false
                         ],
                         layout: {
-                            // Prefer the explicit Persian name, then the default OSM
-                            // name (which is Persian in Iran data). name_en is
-                            // deliberately NOT a fallback: most Iranian ways have no
-                            // name:fa tag, only name + name:en, so falling back to
-                            // name_en would show English labels all over the map.
+                            // Prefer the explicit Persian name, then the default OSM name 
                             "text-field": [
                                 "coalesce",
                                 ["get", "name_fa"],
                                 ["get", "name"]
                             ],
-                            // Must match a fontstack served by Martin. Check
-                            // http://localhost:8080/tiles/catalog for exact names.
                             "text-font": ["Vazirmatn Regular"],
                             "text-size": [
                                 "interpolate", ["linear"], ["zoom"],

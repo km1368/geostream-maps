@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch BOTH streaming jobs + a Spark Connect server in the sedona-stream
+# Launch BOTH streaming jobs + a Spark Connect server in the sedona
 # container.
 #
 # The main pipeline (streaming_job.py) and the lakehouse consumer
