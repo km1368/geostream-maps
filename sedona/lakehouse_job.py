@@ -1,6 +1,6 @@
 # %% lakehouse job: consume gps-processed into the MinIO lakehouse using Iceberg & Polaris
 #
-# Runs as a SECOND spark-submit inside the sedona-stream container.
+# Runs as a SECOND spark-submit inside the sedona container.
 # Layout: Managed by Apache Iceberg via Apache Polaris (REST Catalog).
 # Writes ALL events (invalid pings and streetless included).
 
