@@ -9,10 +9,10 @@ A simulator of map and real-time traffic services (similar to Google Maps) displ
 | ----------- | ------ |
 | **Postgres + PostGIS** | Operational database. Stores geometry, current speed, current predicted speed, current color on the map for each street. |
 | **Redpanda** | Real-time data broker. |
-| **Spark + Sedona** | Stream processing: map GPS pings to streets, flag inaccurate ones, and publishes enriched events back to Redpanda. |
+| **Spark + Sedona** | Maps GPS pings to streets, flags inaccurate ones, publishes enriched events to Redpanda, and hosts the standalone master/worker for Airflow jobs. |
 | **ClickHouse** | Analytical database. Recent speed history per street (shown on click). Receives live data directly from Redpanda. |
 | **Lakehouse (MinIO + Polaris + Iceberg)** | Storage for immutable events. Serves the job for forcasting the baseline speed for each street. |
-| **Airflow** | Orchestrates the job for forcasting the baseline speed for each street. |
+| **Airflow** | Submits the five-minute street-speed prediction job to Sedona with `SparkSubmitOperator` every two minutes. |
 | **Apache Superset** | Business Intelligence dashboards. |
 | **Python** | Generates the live GPS stream (coordinates + speed of users); runs as the compose service `generator`. |
 
@@ -24,21 +24,15 @@ A simulator of map and real-time traffic services (similar to Google Maps) displ
 | Redpanda Console     | [http://localhost:9300](http://localhost:9300) |
 | Airflow              | [http://localhost:8081](http://localhost:8081) |
 | Superset | [http://localhost:8088](http://localhost:8088) |
+| Spark streaming UI | [http://localhost:4040](http://localhost:4040) |
+| Spark lakehouse UI | [http://localhost:4041](http://localhost:4041) |
+| Spark Connect UI | [http://localhost:4042](http://localhost:4042) |
+| Spark master UI | [http://localhost:7079](http://localhost:7079) |
+| Spark worker UI | [http://localhost:7080](http://localhost:7080) |
 
 ### Data flow
 
-```mermaid
-flowchart TD
-    SIM["Python simulator<br/>GPS pings: position + speed"] --> RAW["Redpanda<br/>topic: gps-raw"]
-    RAW --> SP["Spark + Sedona<br/>flag invalid GPS,<br/>spatial-join ping to street"]
-    SP --> ENR["Redpanda<br/>topic: gps-processed"]
-    ENR --> PG[("Postgres + PostGIS<br/>latest street status:<br/>current + baseline duration, color")]
-    ENR --> CH["ClickHouse<br/>raw pings per street + TTL 6h<br/>speed trend per street"]
-    ENR --> S3[("MinIO + Iceberg/Polaris<br/>lakehouse: gps_processed")]
-    S3 --> PRED["Prediction job (every 2 min)<br/>5-minute average speed per street"]
-    PRED --> PG
-    AF["Airflow"] -.->|"orchestrates"| PRED
-```
+![dataflow](assets/dataflow.jpg)
 
 ### UI Stack
 

@@ -7,6 +7,8 @@ applyTo: "sedona/**"
 - Parse Kafka JSON from the `value` column and keep its schema aligned with generator payloads and downstream output.
 - In Spark 4 `foreachBatch`, use the batch DataFrame API and expressions; callback temp views are not visible from the outer SparkSession.
 - `streaming_job.py` owns Kafka enrichment and Postgres traffic updates; `lakehouse_job.py` owns Iceberg/Polaris ingestion. Keep their responsibilities separate.
+- Airflow submits `street_speed_prediction.py` to this container's standalone Spark master/worker; keep `SPARK_MASTER_HOST` and `SPARK_LOCAL_HOSTNAME` set to `sedona-1` so remote clients and workers do not advertise `localhost`.
+- Keep the Spark submit client in Airflow on the same Spark version as this image, and preserve the shared Iceberg jar volume used by the prediction job.
 - Every streaming query needs a persistent checkpoint; preserve existing checkpoint paths and Kafka offset behavior when changing query setup.
 - Traffic validity, matching radius, trigger interval, and speed thresholds are currently hardcoded in `streaming_job.py`; Compose environment values for these are not authoritative.
 - The lakehouse sink writes all processed events to `polaris.telemetry.gps_processed`; keep its schema synchronized with the nine-field JSON emitted by the streaming job.

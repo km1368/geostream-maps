@@ -1,2 +1,2 @@
-pyiceberg[s3fs,pyarrow]
+apache-airflow-providers-apache-spark
 psycopg[binary]
