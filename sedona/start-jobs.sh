@@ -17,6 +17,19 @@ set -u
 
 JARS_DIR=/opt/workspace/jars
 
+export SPARK_MASTER_HOST=${SPARK_MASTER_HOST:-sedona-1}
+export SPARK_LOCAL_HOSTNAME=${SPARK_LOCAL_HOSTNAME:-$SPARK_MASTER_HOST}
+echo "start-jobs: launching standalone Spark master and worker"
+/opt/spark/sbin/start-master.sh \
+    --port 7077 \
+    --webui-port 7079
+/opt/spark/sbin/start-worker.sh \
+    --port 7078 \
+    --webui-port 7080 \
+    --cores 1 \
+    --memory 2G \
+    "spark://$SPARK_MASTER_HOST:7077"
+
 # Kafka connector + Postgres JDBC driver (pre-fetched; --packages hangs on
 # this network). The lakehouse job additionally needs the S3A filesystem:
 # hadoop-aws MUST match the hadoop-client-api version bundled in the image
@@ -30,6 +43,7 @@ S3A_JARS="$KAFKA_JARS,$JARS_DIR/hadoop-aws-3.4.1.jar,$JARS_DIR/bundle-2.24.6.jar
 echo "start-jobs: launching main pipeline (streaming_job.py)"
 /opt/spark/bin/spark-submit \
     --master local[2] \
+    --conf spark.ui.port=4040 \
     --jars "$KAFKA_JARS" \
     /opt/workspace/streaming_job.py &
 MAIN_PID=$!
@@ -37,6 +51,7 @@ MAIN_PID=$!
 echo "start-jobs: launching lakehouse consumer (lakehouse_job.py)"
 /opt/spark/bin/spark-submit \
     --master local[2] \
+    --conf spark.ui.port=4041 \
     --jars "$S3A_JARS" \
     /opt/workspace/lakehouse_job.py &
 LAKEHOUSE_PID=$!
@@ -53,6 +68,7 @@ echo "start-jobs: launching Spark Connect server (remote sessions, :15002)"
 /opt/spark/bin/spark-submit \
     --master local[2] \
     --driver-memory 1g \
+    --conf spark.ui.port=4042 \
     --class org.apache.spark.sql.connect.service.SparkConnectServer \
     --jars "$S3A_JARS" \
     --conf spark.sql.extensions=org.apache.sedona.sql.SedonaSqlExtensions,org.apache.sedona.viz.sql.SedonaVizExtensions,org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \

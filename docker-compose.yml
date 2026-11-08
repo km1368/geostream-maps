@@ -56,12 +56,16 @@ services:
         condition: service_completed_successfully
       polaris-init:
         condition: service_completed_successfully
+      sedona-1:
+        condition: service_started
     environment:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__PARALLELISM: "2"
+      AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "90"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-1:5432/airflow
+      AIRFLOW_CONN_SPARK_SEDONA: '{"conn_type":"spark","host":"spark://sedona-1:7077"}'
       PREDICTION_PGHOST: postgres-1
       PREDICTION_PGPORT: "5432"
       PREDICTION_PGDATABASE: ${POSTGRES_DB}
@@ -82,6 +86,8 @@ services:
     volumes:
       - airflow-data:/opt/airflow
       - ./airflow/dags:/opt/airflow/dags:ro
+      - ./sedona/street_speed_prediction.py:/opt/airflow/sedona/street_speed_prediction.py:ro
+      - sedona-jars:/opt/spark-jars:ro
     mem_limit: 1536m
     cpus: "0.5"
     networks:
@@ -273,6 +279,8 @@ services:
       polaris-init:
         condition: service_completed_successfully
     environment:
+      SPARK_MASTER_HOST: sedona-1
+      SPARK_LOCAL_HOSTNAME: sedona-1
       DRIVER_MEM: 1g
       EXECUTOR_MEM: 1g
       PYSPARK_DRIVER_PYTHON: python3
@@ -296,7 +304,13 @@ services:
       POLARIS_CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID}:${POLARIS_ROOT_CLIENT_SECRET}
     ports:
       - "15002:15002"
+      - "4040:4040"
+      - "4041:4041"
+      - "4042:4042"
+      - "7079:7079"
+      - "7080:7080"
     volumes:
+      - sedona-jars:/opt/workspace/jars
       - ./sedona/streaming_job.py:/opt/workspace/streaming_job.py:ro
       - ./sedona/lakehouse_job.py:/opt/workspace/lakehouse_job.py:ro
       - ./sedona/start-jobs.sh:/opt/workspace/start-jobs.sh:ro
@@ -456,6 +470,7 @@ volumes:
   postgres-data:
   sedona-ivy:
   sedona-checkpoints:
+  sedona-jars:
   clickhouse-data:
   minio-data: 
   airflow-data:

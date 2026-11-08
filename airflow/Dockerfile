@@ -1,9 +1,16 @@
+FROM docker.arvancloud.ir/apache/sedona:1.9.1 AS spark-runtime
+FROM docker.arvancloud.ir/library/eclipse-temurin:17-jre-jammy AS java-runtime
+
 FROM docker.arvancloud.ir/apache/airflow:3.3.1-python3.12
 
+COPY --from=spark-runtime /opt/spark /opt/spark
+COPY --from=java-runtime /opt/java/openjdk /opt/java/openjdk
+ENV SPARK_HOME=/opt/spark
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH="${SPARK_HOME}/bin:${JAVA_HOME}/bin:${PATH}"
+
+USER airflow
 COPY requirements.txt /requirements.txt
-# CPython 3.12 (not 3.14): pyiceberg/pyarrow publish prebuilt wheels for it, so
-# no gcc/libc-headers build step is needed. On the python3.14 base, pyiceberg
-# only ships a source distribution and compiling it requires build-essential.
 RUN pip install --no-cache-dir --constraint \
     "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt" \
     --index-url https://mirror-pypi.runflare.com/simple \
