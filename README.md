@@ -1,38 +1,47 @@
-![GeoStream Maps logo](assets/logo.png)
+<p align="center">
+    <img src="assets/logo.png" alt="GeoStream Maps logo" width="231">
+</p>
+
 ## GeoStream Maps — A real-time data-driven platform for traffic monitoring
 
 A simulator of map and real-time traffic services (similar to Google Maps) displaying live street traffic conditions on a map. Built as the final project of the data engineering course in Sepahram School of Data Engineering. 
 
 ### Data Engineering Stack
 
-| Component   | Role  |
-| ----------- | ------ |
-| **Postgres + PostGIS** | Operational database. Stores geometry, current speed, current predicted speed, current color on the map for each street. |
-| **Redpanda** | Real-time data broker. |
-| **Spark + Sedona** | Maps GPS pings to streets, flags inaccurate ones, publishes enriched events to Redpanda, and hosts the standalone master/worker for Airflow jobs. |
-| **ClickHouse** | Analytical database. Recent speed history per street (shown on click). Receives live data directly from Redpanda. |
-| **Lakehouse (MinIO + Polaris + Iceberg)** | Storage for immutable events. Serves the job for forcasting the baseline speed for each street. |
-| **Airflow** | Submits the five-minute street-speed prediction job to Sedona with `SparkSubmitOperator` every two minutes. |
-| **Apache Superset** | Business Intelligence dashboards. |
-| **Python** | Generates the live GPS stream (coordinates + speed of users); runs as the compose service `generator`. |
+| Component     | Role    |
+| -------------- | ------------ |
+| **Postgres + PostGIS**                    | Operational database. Stores geometry, current speed, current predicted speed, current color on the map for each street.                          |
+| **Redpanda**           | Real-time data broker.               |
+| **Spark + Sedona**                        | Maps GPS pings to streets, flags inaccurate ones, publishes enriched events to Redpanda, and hosts the standalone master/worker for Airflow jobs. |
+| **ClickHouse**                            | Analytical database. Recent speed history per street (shown on click). Receives live data directly from Redpanda.                                 |
+| **Lakehouse (MinIO + Polaris + Iceberg)** | Storage for immutable events. Serves the job for forcasting the baseline speed for each street.                                                   |
+| **Airflow**                               | Submits the five-minute street-speed prediction job to Sedona with `SparkSubmitOperator` every two minutes.                                       |
+| **Apache Superset**                       | Business Intelligence dashboards.                                                                                                                 |
+| **Python**                                | Generates the live GPS stream (coordinates + speed of users); runs as the compose service `generator`.                                            |
 
 ### Web interfaces
 
-| Interface            | Local URL                     |
-| --------------------- | ----------------------------- |
-| Map                  | [http://localhost:8080](http://localhost:8080) |
-| Redpanda Console     | [http://localhost:9300](http://localhost:9300) |
-| Airflow              | [http://localhost:8081](http://localhost:8081) |
-| Superset | [http://localhost:8088](http://localhost:8088) |
+<div align="center">
+
+| Interface          | Local URL                                      |
+| ------------------ | ---------------------------------------------- |
+| Map                | [http://localhost:8080](http://localhost:8080) |
+| Redpanda Console   | [http://localhost:9300](http://localhost:9300) |
+| Airflow            | [http://localhost:8081](http://localhost:8081) |
+| Superset           | [http://localhost:8088](http://localhost:8088) |
 | Spark streaming UI | [http://localhost:4040](http://localhost:4040) |
 | Spark lakehouse UI | [http://localhost:4041](http://localhost:4041) |
-| Spark Connect UI | [http://localhost:4042](http://localhost:4042) |
-| Spark master UI | [http://localhost:7079](http://localhost:7079) |
-| Spark worker UI | [http://localhost:7080](http://localhost:7080) |
+| Spark Connect UI   | [http://localhost:4042](http://localhost:4042) |
+| Spark master UI    | [http://localhost:7079](http://localhost:7079) |
+| Spark worker UI    | [http://localhost:7080](http://localhost:7080) |
+
+</div>
 
 ### Data flow
 
-![dataflow](assets/dataflow.jpg)
+<p align="center">
+    <img src="assets/dataflow.jpg" alt="Data flow">
+</p>
 
 ### UI Stack
 
