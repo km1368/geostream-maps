@@ -11,7 +11,8 @@ ENV PATH="${SPARK_HOME}/bin:${JAVA_HOME}/bin:${PATH}"
 
 USER airflow
 COPY requirements.txt /requirements.txt
+COPY constraints-3.12.txt /constraints-3.12.txt
 RUN pip install --no-cache-dir --constraint \
-    "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt" \
+    /constraints-3.12.txt \
     --index-url https://mirror-pypi.runflare.com/simple \
     -r /requirements.txt
