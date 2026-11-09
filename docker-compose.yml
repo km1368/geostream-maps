@@ -357,8 +357,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
-    mem_limit: 512m
-    cpus: "0.5"
+    mem_limit: 1g
+    cpus: "1"
     networks:
       - mapnet
 

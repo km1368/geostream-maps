@@ -97,7 +97,6 @@ def main():
             password=os.environ["PREDICTION_PGPASSWORD"],
         ) as connection:
             with connection.cursor() as cursor:
-                cursor.execute("UPDATE roads SET predicted_speed_kmh = NULL")
                 for offset in range(0, len(averages), 500):
                     batch = averages[offset:offset + 500]
                     values_sql = ", ".join(["(%s, %s)"] * len(batch))

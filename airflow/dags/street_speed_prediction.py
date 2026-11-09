@@ -6,7 +6,7 @@ from airflow.sdk import dag
 
 @dag(
     dag_id="street_speed_prediction",
-    schedule="*/2 * * * *",
+    schedule="*/5 * * * *",
     start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Tehran"),
     catchup=False,
     max_active_runs=1,
