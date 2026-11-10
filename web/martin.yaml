@@ -1,11 +1,5 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/maplibre/martin/main/schemas/config.json
 
-# Martin caches generated tiles in memory. By default cache entries have no
-# expiry (they are only evicted under size pressure), so the roads tiles would
-# be generated once and served stale forever — the traffic colors on the map
-# would never change even though the `roads` traffic columns are refreshed by
-# the Spark streaming job every 15 seconds. Disable the cache entirely so every
-# tile request is generated fresh from PostGIS.
 cache: disable
 
 postgres:

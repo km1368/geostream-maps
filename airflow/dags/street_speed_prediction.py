@@ -1,5 +1,4 @@
 from datetime import timedelta
-
 import pendulum
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
 from airflow.sdk import dag

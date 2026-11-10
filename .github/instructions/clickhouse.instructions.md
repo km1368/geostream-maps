@@ -10,4 +10,4 @@ applyTo: "clickhouse/**"
 - Aggregate-function state columns are binary states; query them with merge functions such as `avgMerge(...)` and `GROUP BY`, not `SELECT *`.
 - ClickHouse init scripts run only on an empty data volume; rerun the idempotent init script manually when initializing an existing volume.
 - Keep the `/clickhouse/` nginx proxy credentials aligned with the existing `.env` values; never commit credentials.
-- Attach the service to `mapnet` so it can resolve Redpanda and other Compose services.
+- Use `DateTime64` for `timestamp`; `DateTime` cannot parse Spark's microsecond-precision ISO-8601 values, causing Kafka consumption to fail.

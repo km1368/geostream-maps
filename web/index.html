@@ -12,8 +12,7 @@
     <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
 
     <style>
-        /* UI font (legend, popups). The TTF is served by nginx from the
-        same ./fonts directory that is mounted into the Martin container. */
+        /* UI font */
         @font-face {
             font-family: "Vazirmatn";
             src: url("/fonts/Vazirmatn.ttf") format("truetype");
@@ -31,8 +30,7 @@
             font-family: "Vazirmatn", sans-serif;
         }
 
-        /* Popup text is not selectable: dragging across the popup would
-        otherwise highlight it, and double-clicks would select words. */
+        /* Popup text is not selectable */
         .maplibregl-popup-content {
             font-family: "Vazirmatn", sans-serif;
             user-select: none;
@@ -40,8 +38,7 @@
             border-radius: 14px;
         }
 
-        /* The close button sits on the popup's top-right corner; round that
-        corner so it doesn't poke out past the softer content box. */
+        /* close button */
         .maplibregl-popup-close-button {
             border-radius: 0 14px 0 0;
         }
@@ -101,7 +98,7 @@
     <div id="map"></div>
 
     <script>
-        // Required for correct Persian/Arabic rendering
+        // required for correct Persian rendering
         maplibregl.setRTLTextPlugin(
             "https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.3.0/dist/mapbox-gl-rtl-text.js",
             (error) => {
@@ -387,11 +384,8 @@
 
         map.addControl(new maplibregl.NavigationControl(), "top-right");
 
-        // Re-fetch the roads source tiles every 15 seconds so traffic levels
-        // (traffic_level / speed_kmh) stay current. refreshTiles reloads only
-        // the given source, so green areas, water and the background are not
-        // re-requested. nginx already serves /tiles/ with no-cache headers, so
-        // the browser will not return stale tiles from its HTTP cache.
+        // Re-fetch the roads source tiles every 15 seconds 
+        // green areas, water and the background are notre-requested. 
         map.on("load", () => {
             setInterval(() => {
                 // Skip refreshes while the tab is hidden to save bandwidth.
@@ -409,11 +403,7 @@
             3: ["Jammed", "#da1e28"]
         };
 
-        // Last 8 speed readings for one street from ClickHouse, via the nginx
-        // /clickhouse/ proxy (same-origin; nginx injects the credentials).
-        // {street_id:Int64} is a bound query parameter (sent as
-        // param_street_id), so the osm_id coming from the tile can never be
-        // injected into the SQL text. Rows come back newest first.
+        // Last speed readings for one street from ClickHouse
         async function fetchStreetHistory(osmId) {
             const query =
                 "SELECT timestamp, speed_kmh " +
@@ -432,11 +422,7 @@
             return (await res.json()).data;
         }
 
-        // Tiny inline SVG line chart of the last readings, oldest -> newest
-        // (left -> right), with a y-axis (km/h) and x-axis (time of the
-        // oldest/newest reading). Returns "" for 0 or 1 rows — a trend needs
-        // at least two points to be meaningful. Y-scale spans the data
-        // min/max so small changes stay visible.
+        // inline SVG line chart of the last readings
         function speedChart(rows, color) {
             if (rows.length < 2) {
                 return "";
@@ -453,8 +439,7 @@
 
             const min = Math.min(...speeds);
             const max = Math.max(...speeds);
-            // Pad a flat series (all speeds equal) so the line sits mid-chart
-            // instead of on the x-axis.
+            // Pad a flat series (all speeds equal) so the line sits mid-chart instead of on the x-axis.
             const lo = min === max ? min - 1 : min;
             const hi = min === max ? max + 1 : max;
             const span = hi - lo;
@@ -470,8 +455,6 @@
                 )
                 .join("");
 
-            // Y ticks at min / mid / max; one decimal when the range is small
-            // so the labels don't collapse into duplicates.
             const yLabel = (v) => (max - min < 5 ? v.toFixed(1) : Math.round(v));
             const yTicks = [lo, (lo + hi) / 2, hi]
                 .map((v) => {
@@ -484,7 +467,6 @@
                 })
                 .join("");
 
-            // X ticks: time (HH:MM) of the oldest and newest readings.
             const fmt = (ts) => ts.slice(11, 16); // "YYYY-MM-DD HH:MM:SS" -> "HH:MM"
             const xTicks = [0, times.length - 1]
                 .map((i) => `
@@ -529,8 +511,6 @@
                 : "No data";
             const lineColor = level ? level[1] : "#8d8d8d";
 
-            // Current speed as '#,##0.0': thousands separator + exactly one
-            // decimal (e.g. 1234.56 -> "1,234.6", 21 -> "21.0").
             const speedHtml = p.speed_kmh == null
                 ? "No data"
                 : Number(p.speed_kmh).toLocaleString("en-US", {

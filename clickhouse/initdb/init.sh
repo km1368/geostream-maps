@@ -3,15 +3,6 @@ set -e
 
 echo "clickhouse-init: creating Kafka consumption pipeline..."
 
-# NOTE: `timestamp` must be DateTime64, NOT DateTime. Spark writes ISO-8601
-# timestamps with microsecond precision ("2026-10-02T21:39:09.489389") and
-# DateTime cannot parse fractional seconds: the Kafka consumer then fails on
-# EVERY message ("Cannot parse input: expected '"' ... while reading the
-# value of key timestamp"), gets stuck retrying the same offset forever
-# (system.kafka_consumers: num_messages_read grows, num_commits stays 0) and
-# Redpanda console shows "There were issues deserializing the value".
-# Kafka engine tables cannot be altered, so recreate the consumer and view
-# with the expanded event schema; the consumer group retains committed offsets.
 clickhouse-client --multiquery <<'SQL'
 DROP TABLE IF EXISTS mv_gps_processed_aggregated;
 DROP TABLE IF EXISTS kfk_gps_processed_aggregated;

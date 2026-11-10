@@ -234,10 +234,6 @@ def enrich_batch(batch_df, batch_df_id):
             .save()
         )
 
-        # groupBy street_id — traffic_level is derived in update_roads_traffic
-        # by comparing the measured speed against the street's predicted speed
-        # (roads.predicted_speed_kmh, written by the Airflow DAG
-        # street_speed_prediction).
         street_stats = (
             enriched
             .filter(F.col("is_valid") & F.col("street_id").isNotNull())

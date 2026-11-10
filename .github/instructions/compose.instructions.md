@@ -3,8 +3,6 @@ description: "Use when editing Docker Compose services, dependencies, networks, 
 applyTo: "docker-compose.yml"
 ---
 
-# Compose Orchestration
-
 - Keep every service on the explicit `mapnet` network; otherwise service DNS and broker access can fail silently.
 - `import` and `sedona-jupyter` are opt-in profiles. Plain `docker compose up -d` does not start them.
 - `docker compose down -v` only removes services in active profiles; include `--profile import` when removing import-profile containers.
