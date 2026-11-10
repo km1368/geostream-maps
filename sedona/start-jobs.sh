@@ -1,18 +1,3 @@
-#!/usr/bin/env bash
-# Launch BOTH streaming jobs + a Spark Connect server in the sedona
-# container.
-#
-# The main pipeline (streaming_job.py) and the lakehouse consumer
-# (lakehouse_job.py) run as two independent spark-submits with their own
-# checkpoints and Kafka consumer groups. Alongside them a Spark Connect
-# server listens on :15002 so a laptop can attach a remote SparkSession
-# (SparkSession.builder.remote) without running its own Spark image — it
-# gets the same jars + Sedona/Iceberg/Polaris config as the jobs. If ANY of
-# the three exits, the whole container exits so Docker's
-# `restart: unless-stopped` relaunches everything — checkpoints make the
-# restart cheap (no data loss, no reprocessing).
-#
-# NOTE: needs bash (wait -n); the image ships bash 5.2 at /usr/bin/bash.
 set -u
 
 JARS_DIR=/opt/workspace/jars
@@ -30,13 +15,7 @@ echo "start-jobs: launching standalone Spark master and worker"
     --memory 2G \
     "spark://$SPARK_MASTER_HOST:7077"
 
-# Kafka connector + Postgres JDBC driver (pre-fetched; --packages hangs on
-# this network). The lakehouse job additionally needs the S3A filesystem:
-# hadoop-aws MUST match the hadoop-client-api version bundled in the image
-# (3.4.1 for apache/sedona:1.9.1) + the AWS SDK v2 bundle it declares.
-# Iceberg/Polaris: iceberg-spark-runtime provides SparkCatalog + the streaming
-# sink (must match Spark 4.0 / Scala 2.13); iceberg-aws-bundle provides
-# S3FileIO for the REST catalog's MinIO storage.
+# Kafka connector + Postgres JDBC driver 
 KAFKA_JARS="$JARS_DIR/spark-sql-kafka-0-10_2.13-4.0.1.jar,$JARS_DIR/spark-token-provider-kafka-0-10_2.13-4.0.1.jar,$JARS_DIR/kafka-clients-3.9.1.jar,$JARS_DIR/commons-pool2-2.12.0.jar,$JARS_DIR/postgresql-42.7.7.jar"
 S3A_JARS="$KAFKA_JARS,$JARS_DIR/hadoop-aws-3.4.1.jar,$JARS_DIR/bundle-2.24.6.jar,$JARS_DIR/iceberg-spark-runtime-4.0_2.13-1.10.2.jar,$JARS_DIR/iceberg-aws-bundle-1.10.2.jar"
 
@@ -57,13 +36,6 @@ echo "start-jobs: launching lakehouse consumer (lakehouse_job.py)"
 LAKEHOUSE_PID=$!
 
 # Spark Connect server: remote SparkSessions from the host (localhost:15002).
-# Same jar set as the lakehouse job (Kafka connector + Postgres JDBC + S3A +
-# Iceberg) plus the Sedona + Iceberg SQL extensions and the polaris REST
-# catalog, so remote sessions can do everything the jobs do. Launched as a
-# plain foreground spark-submit — NOT sbin/start-connect-server.sh, which
-# daemonizes and would escape `wait -n`. The bundled connect jar is the
-# primary resource; a bare class name without --class is treated as a JAR
-# path and fails with "Please specify one with --class".
 echo "start-jobs: launching Spark Connect server (remote sessions, :15002)"
 /opt/spark/bin/spark-submit \
     --master local[2] \
